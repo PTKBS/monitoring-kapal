@@ -1,6 +1,7 @@
 import datetime
 import io
 import time
+from dateutil.relativedelta import relativedelta
 from fpdf import FPDF
 import pandas as pd
 import streamlit as st
@@ -76,26 +77,39 @@ def load_data():
         .isin(["", "-", "None", "nan", "NaN", "0"])
     ].copy()
 
-    # Parsing Tanggal (Day-First)
-    def parse_flexible_date(val):
-        val_str = str(val).strip()
-        if not val_str or val_str in ["-", "nan", "NaN", "0"]:
-            return None, None
+    # Parsing Tanggal & Window Khusus Surat 'Endorse'
+    def parse_and_calculate_window(row):
+        jenis_surat = str(row["Jenis Surat"]).lower()
+        val_str = str(row["Tgl_Raw"]).strip()
 
+        if not val_str or val_str in ["-", "nan", "NaN", "0"]:
+            return None, None, "-", None
+
+        today = datetime.date.today()
         parsed = pd.to_datetime(val_str, errors="coerce", dayfirst=True)
 
         if pd.notnull(parsed) and parsed.year > 1980:
-            dt = parsed.date()
-            today = datetime.date.today()
-            sisa = (dt - today).days
-            return dt.strftime("%d-%b-%Y"), sisa
+            dt_exp = parsed.date()
+            sisa_hari = (dt_exp - today).days
 
-        return "FORMAT SALAH", 99999
+            # HANYA JIKA ADA KATA 'ENDORSE' BARU DIHITUNG WINDOW ±3 BULAN
+            if "endorse" in jenis_surat:
+                win_start = dt_exp - relativedelta(months=3)
+                win_end = dt_exp + relativedelta(months=3)
+                window_str = f"{win_start.strftime('%d %b %Y')} s/d {win_end.strftime('%d %b %Y')}"
+            else:
+                window_str = "-"
 
-    parsed_results = df_melted["Tgl_Raw"].apply(parse_flexible_date)
+            return dt_exp.strftime("%d-%b-%Y"), sisa_hari, window_str, dt_exp
+
+        return "FORMAT SALAH", 99999, "-", None
+
+    parsed_results = df_melted.apply(parse_and_calculate_window, axis=1)
 
     df_melted["Tgl Expired"] = [r[0] for r in parsed_results]
     df_melted["Sisa Hari"] = [r[1] for r in parsed_results]
+    df_melted["Window Endorse (±3 Bln)"] = [r[2] for r in parsed_results]
+    df_melted["dt_obj"] = [r[3] for r in parsed_results]
 
     df_melted = df_melted[df_melted["Tgl Expired"].notnull()].copy()
 
@@ -124,7 +138,6 @@ def load_data():
         folder_csv_url = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/gviz/tq?tqx=out:csv&sheet=Link_Folder&t={timestamp}"
         df_folder = pd.read_csv(folder_csv_url, dtype=str)
 
-        # Cari nama kolom secara otomatis (fleksibel terhadap nama header)
         col_nama = [c for c in df_folder.columns if "nama" in str(c).lower()]
         col_link = [c for c in df_folder.columns if "link" in str(c).lower()]
 
@@ -137,7 +150,7 @@ def load_data():
                 if k_nama and k_link and k_link.lower() != "nan":
                     dict_folder[k_nama] = k_link
     except Exception as err:
-        st.sidebar.warning(f"Sistem gagal membaca sheet 'Link_Folder': {err}")
+        pass
 
     df_melted["Link Folder"] = df_melted["Nama Kapal"].map(
         lambda x: dict_folder.get(str(x).strip(), "")
@@ -150,6 +163,7 @@ def load_data():
             "Tgl Expired",
             "Sisa Hari",
             "Status",
+            "Window Endorse (±3 Bln)",
             "Link Folder",
         ]
     ]
@@ -173,13 +187,14 @@ class PDFReport(FPDF):
         )
         self.ln(5)
 
-        self.set_font("Helvetica", "B", 10)
+        self.set_font("Helvetica", "B", 9)
         self.set_fill_color(220, 220, 220)
-        self.cell(65, 8, " Nama Kapal", border=1, fill=True)
-        self.cell(85, 8, " Jenis Surat", border=1, fill=True)
-        self.cell(35, 8, " Tgl Expired", border=1, fill=True, align="C")
-        self.cell(30, 8, " Sisa Hari", border=1, fill=True, align="C")
-        self.cell(62, 8, " Status", border=1, fill=True, align="C")
+        self.cell(50, 8, " Nama Kapal", border=1, fill=True)
+        self.cell(65, 8, " Jenis Surat", border=1, fill=True)
+        self.cell(28, 8, " Tgl Expired", border=1, fill=True, align="C")
+        self.cell(22, 8, " Sisa Hari", border=1, fill=True, align="C")
+        self.cell(38, 8, " Status", border=1, fill=True, align="C")
+        self.cell(74, 8, " Window Endorse (±3 Bln)", border=1, fill=True, align="C")
         self.ln()
 
     def footer(self):
@@ -192,7 +207,7 @@ def convert_df_to_pdf(df_data):
     pdf = PDFReport(orientation="L", unit="mm", format="A4")
     pdf.alias_nb_pages()
     pdf.add_page()
-    pdf.set_font("Helvetica", "", 9)
+    pdf.set_font("Helvetica", "", 8)
 
     for _, row in df_data.iterrows():
         status = str(row["Status"])
@@ -207,21 +222,21 @@ def convert_df_to_pdf(df_data):
             pdf.set_fill_color(255, 255, 255)
 
         pdf.cell(
+            50,
+            7,
+            f" {str(row['Nama Kapal'])[:25]}",
+            border=1,
+            fill=True,
+        )
+        pdf.cell(
             65,
             7,
-            f" {str(row['Nama Kapal'])[:35]}",
+            f" {str(row['Jenis Surat'])[:35]}",
             border=1,
             fill=True,
         )
         pdf.cell(
-            85,
-            7,
-            f" {str(row['Jenis Surat'])[:48]}",
-            border=1,
-            fill=True,
-        )
-        pdf.cell(
-            35,
+            28,
             7,
             str(row["Tgl Expired"]),
             border=1,
@@ -229,14 +244,22 @@ def convert_df_to_pdf(df_data):
             fill=True,
         )
         pdf.cell(
-            30,
+            22,
             7,
-            f"{row['Sisa Hari']} hari",
+            f"{row['Sisa Hari']} h",
             border=1,
             align="C",
             fill=True,
         )
-        pdf.cell(62, 7, f" {status}", border=1, fill=True)
+        pdf.cell(38, 7, f" {status}", border=1, fill=True)
+        pdf.cell(
+            74,
+            7,
+            f" {str(row['Window Endorse (±3 Bln)'])}",
+            border=1,
+            align="C",
+            fill=True,
+        )
         pdf.ln()
 
     return bytes(pdf.output())
@@ -335,7 +358,14 @@ try:
     # Tampilkan Tabel Utama
     st.dataframe(
         df_display[
-            ["Nama Kapal", "Jenis Surat", "Tgl Expired", "Sisa Hari", "Status"]
+            [
+                "Nama Kapal",
+                "Jenis Surat",
+                "Tgl Expired",
+                "Sisa Hari",
+                "Status",
+                "Window Endorse (±3 Bln)",
+            ]
         ],
         use_container_width=True,
         hide_index=True,
@@ -345,7 +375,6 @@ try:
     st.markdown("---")
     st.subheader("📂 Direct Softcopy Sertifikat PDF")
 
-    # Filter pilihan kapal khusus softcopy
     daftar_kapal_tersedia = sorted(list(df_display["Nama Kapal"].unique()))
     pilihan_kapal = st.selectbox(
         "Pilih Nama Kapal untuk Membuka Folder Softcopy Sertifikat:",
