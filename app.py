@@ -189,12 +189,12 @@ class PDFReport(FPDF):
 
         self.set_font("Helvetica", "B", 9)
         self.set_fill_color(220, 220, 220)
-        self.cell(50, 8, " Nama Kapal", border=1, fill=True)
-        self.cell(65, 8, " Jenis Surat", border=1, fill=True)
-        self.cell(28, 8, " Tgl Expired", border=1, fill=True, align="C")
-        self.cell(22, 8, " Sisa Hari", border=1, fill=True, align="C")
+        self.cell(45, 8, " Nama Kapal", border=1, fill=True)
+        self.cell(75, 8, " Jenis Surat", border=1, fill=True)
+        self.cell(26, 8, " Tgl Expired", border=1, fill=True, align="C")
+        self.cell(20, 8, " Sisa Hari", border=1, fill=True, align="C")
         self.cell(38, 8, " Status", border=1, fill=True, align="C")
-        self.cell(74, 8, " Window Endorse (±3 Bln)", border=1, fill=True, align="C")
+        self.cell(73, 8, " Window Endorse (±3 Bln)", border=1, fill=True, align="C")
         self.ln()
 
     def footer(self):
@@ -222,21 +222,21 @@ def convert_df_to_pdf(df_data):
             pdf.set_fill_color(255, 255, 255)
 
         pdf.cell(
-            50,
+            45,
             7,
-            f" {str(row['Nama Kapal'])[:25]}",
+            f" {str(row['Nama Kapal'])[:22]}",
             border=1,
             fill=True,
         )
         pdf.cell(
-            65,
+            75,
             7,
-            f" {str(row['Jenis Surat'])[:35]}",
+            f" {str(row['Jenis Surat'])[:45]}",
             border=1,
             fill=True,
         )
         pdf.cell(
-            28,
+            26,
             7,
             str(row["Tgl Expired"]),
             border=1,
@@ -244,7 +244,7 @@ def convert_df_to_pdf(df_data):
             fill=True,
         )
         pdf.cell(
-            22,
+            20,
             7,
             f"{row['Sisa Hari']} h",
             border=1,
@@ -253,7 +253,7 @@ def convert_df_to_pdf(df_data):
         )
         pdf.cell(38, 7, f" {status}", border=1, fill=True)
         pdf.cell(
-            74,
+            73,
             7,
             f" {str(row['Window Endorse (±3 Bln)'])}",
             border=1,
@@ -355,7 +355,7 @@ try:
         lambda x: status_emoji_map.get(x, x)
     )
 
-    # Tampilkan Tabel Utama
+    # Tampilkan Tabel Utama dengan Pengaturan Lebar Kolom (Column Config)
     st.dataframe(
         df_display[
             [
@@ -369,6 +369,14 @@ try:
         ],
         use_container_width=True,
         hide_index=True,
+        column_config={
+            "Nama Kapal": st.column_config.TextColumn("Nama Kapal", width="medium"),
+            "Jenis Surat": st.column_config.TextColumn("Jenis Surat", width="large"),  # Ruang lebih lebar agar teks panjang muat
+            "Tgl Expired": st.column_config.TextColumn("Tgl Expired", width="small"),
+            "Sisa Hari": st.column_config.NumberColumn("Sisa Hari", width="small"),
+            "Status": st.column_config.TextColumn("Status", width="medium"),
+            "Window Endorse (±3 Bln)": st.column_config.TextColumn("Window Endorse (±3 Bln)", width="large"),
+        },
     )
 
     # FITUR DIRECT SOFTCOPY SERTIFIKAT VIA LINK FOLDER KAPAL
