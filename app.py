@@ -372,7 +372,7 @@ try:
         column_config={
             "Nama Kapal": st.column_config.TextColumn("Nama Kapal", width="medium"),
             "Jenis Surat": st.column_config.TextColumn("Jenis Surat", width="medium"),  # Ruang lebih lebar agar teks panjang muat
-            "Tgl Expired": st.column_config.TextColumn("Tgl Expired", width="small"),
+            "Tgl Expired": st.column_config.TextColumn("Tgl Expired", width="medium"),
             "Sisa Hari": st.column_config.NumberColumn("Sisa Hari", width="small"),
             "Status": st.column_config.TextColumn("Status", width="medium"),
             "Window Endorse (±3 Bln)": st.column_config.TextColumn("Window Endorse (±3 Bln)", width="large"),
