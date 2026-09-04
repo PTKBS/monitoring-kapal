@@ -15,48 +15,50 @@ def load_data():
     timestamp = int(time.time())
     sheet_csv_url = f"https://docs.google.com/spreadsheets/d/1ovR8ZxhQmLYv73iSu1xWEXsG1ipL448fmIhs4zJ8P6o/export?format=csv&t={timestamp}"
 
-    # 1. Baca data dari Google Sheets CSV (pastikan semua dibaca sebagai object/string)
+    # 1. Baca data mentah dari Google Sheets
     df_raw = pd.read_csv(sheet_csv_url, header=None, dtype=str)
 
-    # Cari baris header nama kapal (baris yang memiliki kata 'JENIS SURAT' atau baris ke-2)
+    # Kunci indeks header ke baris ke-2 (index 1) di mana nama kapal sebenarnya berada
     header_idx = 1
-    for idx, row in df_raw.iterrows():
-        # Konversi setiap elemen di row ke str secara aman
-        row_str = " ".join([str(val) for val in row if pd.notnull(val)]).upper()
-        if "JENIS SURAT" in row_str or "SURAT" in row_str:
-            header_idx = idx
-            break
 
-    # Re-read dengan header yang tepat
-    df_data = df_raw.iloc[header_idx + 1 :].copy()
+    # Ambil baris header kapal
     raw_headers = df_raw.iloc[header_idx].tolist()
 
-    # Perbaiki nama kolom header agar tidak ada yang terbuang/kosong
+    # Tentukan baris data mulai setelah header
+    df_data = df_raw.iloc[header_idx + 1 :].copy()
+
+    # Tentukan nama kapal dengan mengisi merged cells (ffill)
     clean_headers = []
-    last_valid_kapal = "Kapal Unknown"
+    last_kapal = "Kapal Unknown"
 
     for i, h in enumerate(raw_headers):
         h_str = str(h).strip() if pd.notnull(h) else ""
-        if i == 0:
-            clean_headers.append("Jenis Surat")
-        else:
-            if h_str != "" and "unnamed" not in h_str.lower() and h_str != "nan":
-                last_valid_kapal = h_str
-                clean_headers.append(h_str)
+
+        # Abaikan jika ini teks label 'Tanggal Berakhir Surat'
+        if "tanggal berakhir" in h_str.lower() or i == 0:
+            if i == 0:
+                clean_headers.append("Jenis Surat")
             else:
-                clean_headers.append(f"{last_valid_kapal} ({i})")
+                clean_headers.append(f"{last_kapal} (Col {i})")
+        elif h_str != "" and h_str.lower() != "nan":
+            last_kapal = h_str
+            clean_headers.append(h_str)
+        else:
+            clean_headers.append(f"{last_kapal} (Col {i})")
 
     df_data.columns = clean_headers
 
-    # Filter baris yang Jenis Surat-nya kosong
+    # Filter baris yang Jenis Surat-nya kosong atau cuma header terikut
     df_data = df_data.dropna(subset=["Jenis Surat"])
+    df_data["Jenis Surat"] = df_data["Jenis Surat"].astype(str).str.strip()
+
     df_data = df_data[
-        ~df_data["Jenis Surat"].astype(str).str.strip().isin(["", "nan", "NaN"])
+        ~df_data["Jenis Surat"].isin(["", "nan", "NaN", "JENIS SURAT", "None"])
     ]
 
     kolom_kapal = [c for c in clean_headers if c != "Jenis Surat"]
 
-    # 2. Transpose / Unpivot SEMUA Kolom Kapal
+    # 2. Unpivot / Transpose
     df_melted = pd.melt(
         df_data,
         id_vars=["Jenis Surat"],
@@ -65,19 +67,23 @@ def load_data():
         value_name="Tgl_Raw",
     )
 
-    # Bersihkan nama kapal dari penanda indeks tambahan
+    # Bersihkan nama kapal dari sufiks unik kolom
     df_melted["Nama Kapal"] = (
-        df_melted["Nama Kapal"].astype(str).str.replace(r"\s\(\d+\)$", "", regex=True)
+        df_melted["Nama Kapal"]
+        .astype(str)
+        .str.replace(r"\s\(Col\s\d+\)$", "", regex=True)
     )
-    df_melted["Jenis Surat"] = df_melted["Jenis Surat"].astype(str).str.strip()
 
-    # Hapus sel tanggal yang kosong / strip (-)
+    # Filter sel tanggal kosong / strip
     df_melted = df_melted[
         df_melted["Tgl_Raw"].notnull()
-        & ~df_melted["Tgl_Raw"].astype(str).str.strip().isin(["", "-", "None", "nan", "NaN"])
+        & ~df_melted["Tgl_Raw"]
+        .astype(str)
+        .str.strip()
+        .isin(["", "-", "None", "nan", "NaN", "0"])
     ].copy()
 
-    # 3. Konversi Tanggal (DD/MM/YYYY)
+    # 3. Parsing Tanggal
     def parse_flexible_date(val):
         val_str = str(val).strip()
         if not val_str or val_str in ["-", "nan", "NaN", "0"]:
@@ -97,6 +103,9 @@ def load_data():
 
     df_melted["Tgl Expired"] = [r[0] for r in parsed_results]
     df_melted["Sisa Hari"] = [r[1] for r in parsed_results]
+
+    # Filter data yang tidak valid
+    df_melted = df_melted[df_melted["Tgl Expired"].notnull()].copy()
 
     def get_status(row):
         tgl_str = row["Tgl Expired"]
