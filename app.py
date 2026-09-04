@@ -20,11 +20,7 @@ def load_data():
 
     # Kunci indeks header ke baris ke-2 (index 1) di mana nama kapal sebenarnya berada
     header_idx = 1
-
-    # Ambil baris header kapal
     raw_headers = df_raw.iloc[header_idx].tolist()
-
-    # Tentukan baris data mulai setelah header
     df_data = df_raw.iloc[header_idx + 1 :].copy()
 
     # Tentukan nama kapal dengan mengisi merged cells (ffill)
@@ -33,8 +29,6 @@ def load_data():
 
     for i, h in enumerate(raw_headers):
         h_str = str(h).strip() if pd.notnull(h) else ""
-
-        # Abaikan jika ini teks label 'Tanggal Berakhir Surat'
         if "tanggal berakhir" in h_str.lower() or i == 0:
             if i == 0:
                 clean_headers.append("Jenis Surat")
@@ -48,10 +42,9 @@ def load_data():
 
     df_data.columns = clean_headers
 
-    # Filter baris yang Jenis Surat-nya kosong atau cuma header terikut
+    # Filter baris yang Jenis Surat-nya kosong
     df_data = df_data.dropna(subset=["Jenis Surat"])
     df_data["Jenis Surat"] = df_data["Jenis Surat"].astype(str).str.strip()
-
     df_data = df_data[
         ~df_data["Jenis Surat"].isin(["", "nan", "NaN", "JENIS SURAT", "None"])
     ]
@@ -67,7 +60,7 @@ def load_data():
         value_name="Tgl_Raw",
     )
 
-    # Bersihkan nama kapal dari sufiks unik kolom
+    # Bersihkan nama kapal
     df_melted["Nama Kapal"] = (
         df_melted["Nama Kapal"]
         .astype(str)
@@ -83,12 +76,14 @@ def load_data():
         .isin(["", "-", "None", "nan", "NaN", "0"])
     ].copy()
 
-    # 3. Parsing Tanggal
+    # 3. Parsing Tanggal SAKTI (Memaksa Day-First)
     def parse_flexible_date(val):
         val_str = str(val).strip()
         if not val_str or val_str in ["-", "nan", "NaN", "0"]:
             return None, None
 
+        # Paksa pandas membaca tanggal dulu baru bulan (dayfirst=True)
+        # Karena Google Sheets kamu formatnya sudah Day-Month-Year (contoh: 4-12-2026)
         parsed = pd.to_datetime(val_str, errors="coerce", dayfirst=True)
 
         if pd.notnull(parsed) and parsed.year > 1980:
