@@ -1,4 +1,5 @@
 import datetime
+import io
 import time
 import pandas as pd
 import streamlit as st
@@ -18,12 +19,12 @@ def load_data():
     # 1. Baca data mentah dari Google Sheets
     df_raw = pd.read_csv(sheet_csv_url, header=None, dtype=str)
 
-    # Kunci indeks header ke baris ke-2 (index 1) di mana nama kapal sebenarnya berada
+    # Kunci indeks header ke baris ke-2 (index 1) tempat nama kapal
     header_idx = 1
     raw_headers = df_raw.iloc[header_idx].tolist()
     df_data = df_raw.iloc[header_idx + 1 :].copy()
 
-    # Tentukan nama kapal dengan mengisi merged cells (ffill)
+    # Tentukan nama kapal dengan mengisi merged cells
     clean_headers = []
     last_kapal = "Kapal Unknown"
 
@@ -76,14 +77,12 @@ def load_data():
         .isin(["", "-", "None", "nan", "NaN", "0"])
     ].copy()
 
-    # 3. Parsing Tanggal SAKTI (Memaksa Day-First)
+    # 3. Parsing Tanggal (Day-First)
     def parse_flexible_date(val):
         val_str = str(val).strip()
         if not val_str or val_str in ["-", "nan", "NaN", "0"]:
             return None, None
 
-        # Paksa pandas membaca tanggal dulu baru bulan (dayfirst=True)
-        # Karena Google Sheets kamu formatnya sudah Day-Month-Year (contoh: 4-12-2026)
         parsed = pd.to_datetime(val_str, errors="coerce", dayfirst=True)
 
         if pd.notnull(parsed) and parsed.year > 1980:
@@ -124,6 +123,23 @@ def load_data():
     return df_melted[
         ["Nama Kapal", "Jenis Surat", "Tgl Expired", "Sisa Hari", "Status"]
     ]
+
+
+# Fungsi konversi DataFrame ke Excel format binary
+def convert_df_to_excel(df_to_export):
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df_to_export.to_excel(
+            writer, index=False, sheet_name="Monitoring Surat"
+        )
+        # Auto-adjust lebar kolom
+        worksheet = writer.sheets["Monitoring Surat"]
+        for col in worksheet.columns:
+            max_len = max(len(str(cell.value or "")) for cell in col)
+            col_letter = col[0].column_letter
+            worksheet.column_dimensions[col_letter].width = max(max_len + 3, 12)
+    processed_data = output.getvalue()
+    return processed_data
 
 
 try:
@@ -189,7 +205,20 @@ try:
             by="Sisa Hari", ascending=True, na_position="last"
         )
 
-    st.subheader("📋 Daftar Detail Surat Kapal")
+    col_title, col_download = st.columns([3, 1])
+
+    with col_title:
+        st.subheader("📋 Daftar Detail Surat Kapal")
+
+    with col_download:
+        excel_data = convert_df_to_excel(df_filtered)
+        st.download_button(
+            label="📥 Download Excel (.xlsx)",
+            data=excel_data,
+            file_name=f"Monitoring_Surat_Kapal_{datetime.date.today().strftime('%d_%b_%Y')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
     st.dataframe(df_filtered, use_container_width=True, hide_index=True)
 
 except Exception as e:
