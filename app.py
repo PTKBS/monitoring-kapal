@@ -1,6 +1,7 @@
 import datetime
 import io
 import time
+from fpdf import FPDF
 import pandas as pd
 import streamlit as st
 
@@ -106,17 +107,17 @@ def load_data():
         sisa = row["Sisa Hari"]
 
         if tgl_str == "FORMAT SALAH":
-            return "⚠️ FORMAT TANGGAL SALAH"
+            return "FORMAT TANGGAL SALAH"
 
         sisa = int(sisa)
         if sisa <= 0:
-            return "🔴 EXPIRED"
+            return "EXPIRED"
         elif sisa <= 14:
-            return "🔴 SANGAT DESAK (<=14 Hari)"
+            return "SANGAT DESAK (<=14 Hari)"
         elif sisa <= 30:
-            return "🟡 PERINGATAN (<=30 Hari)"
+            return "PERINGATAN (<=30 Hari)"
         else:
-            return "🟢 AMAN"
+            return "AMAN"
 
     df_melted["Status"] = df_melted.apply(get_status, axis=1)
 
@@ -125,21 +126,93 @@ def load_data():
     ]
 
 
-# Fungsi konversi DataFrame ke Excel format binary
-def convert_df_to_excel(df_to_export):
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df_to_export.to_excel(
-            writer, index=False, sheet_name="Monitoring Surat"
+# Class generator PDF
+class PDFReport(FPDF):
+
+    def header(self):
+        self.set_font("Helvetica", "B", 14)
+        self.cell(
+            0, 8, "LAPORAN MONITORING MASA BERLAKU SURAT KAPAL", ln=True, align="C"
         )
-        # Auto-adjust lebar kolom
-        worksheet = writer.sheets["Monitoring Surat"]
-        for col in worksheet.columns:
-            max_len = max(len(str(cell.value or "")) for cell in col)
-            col_letter = col[0].column_letter
-            worksheet.column_dimensions[col_letter].width = max(max_len + 3, 12)
-    processed_data = output.getvalue()
-    return processed_data
+        self.set_font("Helvetica", "", 10)
+        self.cell(
+            0,
+            6,
+            f"Tanggal Cetak: {datetime.date.today().strftime('%d-%b-%Y')}",
+            ln=True,
+            align="C",
+        )
+        self.ln(5)
+
+        # Header Tabel
+        self.set_font("Helvetica", "B", 10)
+        self.set_fill_color(220, 220, 220)
+        self.cell(65, 8, " Nama Kapal", border=1, fill=True)
+        self.cell(85, 8, " Jenis Surat", border=1, fill=True)
+        self.cell(35, 8, " Tgl Expired", border=1, fill=True, align="C")
+        self.cell(30, 8, " Sisa Hari", border=1, fill=True, align="C")
+        self.cell(62, 8, " Status", border=1, fill=True, align="C")
+        self.ln()
+
+    def footer(self):
+        self.set_y(-15)
+        self.set_font("Helvetica", "I", 8)
+        self.cell(0, 10, f"Halaman {self.page_no()}/{{nb}}", align="C")
+
+
+def convert_df_to_pdf(df_data):
+    pdf = PDFReport(orientation="L", unit="mm", format="A4")
+    pdf.alias_nb_pages()
+    pdf.add_page()
+    pdf.set_font("Helvetica", "", 9)
+
+    for _, row in df_data.iterrows():
+        status = str(row["Status"])
+
+        # Warna background baris berdasarkan status
+        if "EXPIRED" in status:
+            pdf.set_fill_color(255, 204, 204)  # Merah tua muda
+        elif "DESAK" in status:
+            pdf.set_fill_color(255, 230, 204)  # Oranye
+        elif "PERINGATAN" in status:
+            pdf.set_fill_color(255, 255, 204)  # Kuning
+        else:
+            pdf.set_fill_color(255, 255, 255)  # Putih
+
+        pdf.cell(
+            65,
+            7,
+            f" {str(row['Nama Kapal'])[:35]}",
+            border=1,
+            fill=True,
+        )
+        pdf.cell(
+            85,
+            7,
+            f" {str(row['Jenis Surat'])[:48]}",
+            border=1,
+            fill=True,
+        )
+        pdf.cell(
+            35,
+            7,
+            str(row["Tgl Expired"]),
+            border=1,
+            align="C",
+            fill=True,
+        )
+        pdf.cell(
+            30,
+            7,
+            f"{row['Sisa Hari']} hari",
+            border=1,
+            align="C",
+            fill=True,
+        )
+        pdf.cell(62, 7, f" {status}", border=1, fill=True)
+        pdf.ln()
+
+    return bytes(pdf.output())
 
 
 try:
@@ -211,15 +284,28 @@ try:
         st.subheader("📋 Daftar Detail Surat Kapal")
 
     with col_download:
-        excel_data = convert_df_to_excel(df_filtered)
+        pdf_bytes = convert_df_to_pdf(df_filtered)
         st.download_button(
-            label="📥 Download Excel (.xlsx)",
-            data=excel_data,
-            file_name=f"Monitoring_Surat_Kapal_{datetime.date.today().strftime('%d_%b_%Y')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            label="📄 Download PDF",
+            data=pdf_bytes,
+            file_name=f"Laporan_Surat_Kapal_{datetime.date.today().strftime('%d_%b_%Y')}.pdf",
+            mime="application/pdf",
         )
 
-    st.dataframe(df_filtered, use_container_width=True, hide_index=True)
+    # Tampilan tabel dengan emoji status untuk UI web
+    df_display = df_filtered.copy()
+    status_emoji_map = {
+        "EXPIRED": "🔴 EXPIRED",
+        "SANGAT DESAK (<=14 Hari)": "🔴 SANGAT DESAK (<=14 Hari)",
+        "PERINGATAN (<=30 Hari)": "🟡 PERINGATAN (<=30 Hari)",
+        "AMAN": "🟢 AMAN",
+        "FORMAT TANGGAL SALAH": "⚠️ FORMAT TANGGAL SALAH",
+    }
+    df_display["Status"] = df_display["Status"].map(
+        lambda x: status_emoji_map.get(x, x)
+    )
+
+    st.dataframe(df_display, use_container_width=True, hide_index=True)
 
 except Exception as e:
     st.error(f"Gagal membaca data dari Google Sheets.\n\nDetail Error: {e}")
