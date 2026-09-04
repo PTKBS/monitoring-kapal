@@ -355,7 +355,7 @@ try:
         lambda x: status_emoji_map.get(x, x)
     )
 
-    # Tampilkan Tabel Utama dengan Pengaturan Lebar Kolom (Column Config)
+    # Tampilkan Tabel Utama dengan Konfigurasi Lebar Sesuai Permintaan
     st.dataframe(
         df_display[
             [
@@ -370,12 +370,12 @@ try:
         use_container_width=True,
         hide_index=True,
         column_config={
-            "Nama Kapal": st.column_config.TextColumn("Nama Kapal", width="medium"),
-            "Jenis Surat": st.column_config.TextColumn("Jenis Surat", width="medium"),  # Ruang lebih lebar agar teks panjang muat
-            "Tgl Expired": st.column_config.TextColumn("Tgl Expired", width="small"),
-            "Sisa Hari": st.column_config.NumberColumn("Sisa Hari", width="small"),
-            "Status": st.column_config.TextColumn("Status", width="small"),
-            "Window Endorse (±3 Bln)": st.column_config.TextColumn("Window Endorse (±3 Bln)", width="large"),
+            "Nama Kapal": st.column_config.TextColumn("Nama Kapal"),  # Otomatis pas
+            "Jenis Surat": st.column_config.TextColumn("Jenis Surat", width="medium"),  # Tetap medium
+            "Tgl Expired": st.column_config.TextColumn("Tgl Expired"),  # Otomatis pas
+            "Sisa Hari": st.column_config.NumberColumn("Sisa Hari", width="small"),  # Kecil
+            "Status": st.column_config.TextColumn("Status", width="small"),  # Kecil
+            "Window Endorse (±3 Bln)": st.column_config.TextColumn("Window Endorse (±3 Bln)"),  # Otomatis pas
         },
     )
 
