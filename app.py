@@ -118,22 +118,26 @@ def load_data():
 
     df_melted["Status"] = df_melted.apply(get_status, axis=1)
 
-    # 2. Baca Sheet2 (Link_Folder)
+    # 2. Baca Sheet 'Link_Folder' secara fleksibel
     dict_folder = {}
     try:
         folder_csv_url = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/gviz/tq?tqx=out:csv&sheet=Link_Folder&t={timestamp}"
         df_folder = pd.read_csv(folder_csv_url, dtype=str)
-        if (
-            "Nama Kapal" in df_folder.columns
-            and "Link Folder Google Drive" in df_folder.columns
-        ):
+
+        # Cari nama kolom secara otomatis (fleksibel terhadap nama header)
+        col_nama = [c for c in df_folder.columns if "nama" in str(c).lower()]
+        col_link = [c for c in df_folder.columns if "link" in str(c).lower()]
+
+        if col_nama and col_link:
+            nama_col = col_nama[0]
+            link_col = col_link[0]
             for _, r in df_folder.iterrows():
-                k_nama = str(r["Nama Kapal"]).strip()
-                k_link = str(r["Link Folder Google Drive"]).strip()
+                k_nama = str(r[nama_col]).strip()
+                k_link = str(r[link_col]).strip()
                 if k_nama and k_link and k_link.lower() != "nan":
                     dict_folder[k_nama] = k_link
-    except:
-        pass
+    except Exception as err:
+        st.sidebar.warning(f"Sistem gagal membaca sheet 'Link_Folder': {err}")
 
     df_melted["Link Folder"] = df_melted["Nama Kapal"].map(
         lambda x: dict_folder.get(str(x).strip(), "")
@@ -328,7 +332,7 @@ try:
         lambda x: status_emoji_map.get(x, x)
     )
 
-    # Tampilkan Tabel Utama (tanpa kolom link folder biar tetap bersih)
+    # Tampilkan Tabel Utama
     st.dataframe(
         df_display[
             ["Nama Kapal", "Jenis Surat", "Tgl Expired", "Sisa Hari", "Status"]
@@ -342,14 +346,13 @@ try:
     st.subheader("📂 Direct Softcopy Sertifikat PDF")
 
     # Filter pilihan kapal khusus softcopy
-    daftar_kapal_tersedia = list(df_display["Nama Kapal"].unique())
+    daftar_kapal_tersedia = sorted(list(df_display["Nama Kapal"].unique()))
     pilihan_kapal = st.selectbox(
         "Pilih Nama Kapal untuk Membuka Folder Softcopy Sertifikat:",
         options=["-- Pilih Kapal --"] + daftar_kapal_tersedia,
     )
 
     if pilihan_kapal != "-- Pilih Kapal --":
-        # Ambil link folder dari data
         row_kapal = df_display[df_display["Nama Kapal"] == pilihan_kapal].iloc[0]
         link_folder_kapal = row_kapal["Link Folder"]
 
@@ -366,7 +369,7 @@ try:
             )
         else:
             st.warning(
-                f"⚠️ Link folder Google Drive untuk **{pilihan_kapal}** belum dimasukkan di tab sheet 'Link_Folder' pada Google Sheets."
+                f"⚠️ Link folder Google Drive untuk **{pilihan_kapal}** belum terdeteksi. Pastikan nama tab sheet di Google Sheets adalah **Link_Folder** dan nama kapal-nya tertulis sama persis."
             )
 
 except Exception as e:
