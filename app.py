@@ -374,7 +374,7 @@ try:
             "Jenis Surat": st.column_config.TextColumn("Jenis Surat", width="medium"),  # Ruang lebih lebar agar teks panjang muat
             "Tgl Expired": st.column_config.TextColumn("Tgl Expired", width="small"),
             "Sisa Hari": st.column_config.NumberColumn("Sisa Hari", width="small"),
-            "Status": st.column_config.TextColumn("Status", width="medium"),
+            "Status": st.column_config.TextColumn("Status", width="small"),
             "Window Endorse (±3 Bln)": st.column_config.TextColumn("Window Endorse (±3 Bln)", width="large"),
         },
     )
