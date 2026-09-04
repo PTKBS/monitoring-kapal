@@ -12,20 +12,21 @@ st.set_page_config(
 st.title("🚢 Dashboard Monitoring Masa Berlaku Surat Kapal")
 st.caption("Aplikasi pemantauan otomatis via Google Sheets (Real-time Live)")
 
+# Spreadsheet ID
+SPREADSHEET_ID = "1ovR8ZxhQmLYv73iSu1xWEXsG1ipL448fmIhs4zJ8P6o"
+
 
 def load_data():
     timestamp = int(time.time())
-    sheet_csv_url = f"https://docs.google.com/spreadsheets/d/1ovR8ZxhQmLYv73iSu1xWEXsG1ipL448fmIhs4zJ8P6o/export?format=csv&t={timestamp}"
 
-    # 1. Baca data mentah dari Google Sheets
+    # 1. Baca Sheet Utama (Data Tanggal Surat)
+    sheet_csv_url = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/export?format=csv&t={timestamp}"
     df_raw = pd.read_csv(sheet_csv_url, header=None, dtype=str)
 
-    # Kunci indeks header ke baris ke-2 (index 1) tempat nama kapal
     header_idx = 1
     raw_headers = df_raw.iloc[header_idx].tolist()
     df_data = df_raw.iloc[header_idx + 1 :].copy()
 
-    # Tentukan nama kapal dengan mengisi merged cells
     clean_headers = []
     last_kapal = "Kapal Unknown"
 
@@ -44,7 +45,6 @@ def load_data():
 
     df_data.columns = clean_headers
 
-    # Filter baris yang Jenis Surat-nya kosong
     df_data = df_data.dropna(subset=["Jenis Surat"])
     df_data["Jenis Surat"] = df_data["Jenis Surat"].astype(str).str.strip()
     df_data = df_data[
@@ -53,7 +53,7 @@ def load_data():
 
     kolom_kapal = [c for c in clean_headers if c != "Jenis Surat"]
 
-    # 2. Unpivot / Transpose
+    # Unpivot / Transpose
     df_melted = pd.melt(
         df_data,
         id_vars=["Jenis Surat"],
@@ -62,14 +62,12 @@ def load_data():
         value_name="Tgl_Raw",
     )
 
-    # Bersihkan nama kapal
     df_melted["Nama Kapal"] = (
         df_melted["Nama Kapal"]
         .astype(str)
         .str.replace(r"\s\(Col\s\d+\)$", "", regex=True)
     )
 
-    # Filter sel tanggal kosong / strip
     df_melted = df_melted[
         df_melted["Tgl_Raw"].notnull()
         & ~df_melted["Tgl_Raw"]
@@ -78,7 +76,7 @@ def load_data():
         .isin(["", "-", "None", "nan", "NaN", "0"])
     ].copy()
 
-    # 3. Parsing Tanggal (Day-First)
+    # Parsing Tanggal (Day-First)
     def parse_flexible_date(val):
         val_str = str(val).strip()
         if not val_str or val_str in ["-", "nan", "NaN", "0"]:
@@ -99,7 +97,6 @@ def load_data():
     df_melted["Tgl Expired"] = [r[0] for r in parsed_results]
     df_melted["Sisa Hari"] = [r[1] for r in parsed_results]
 
-    # Filter data yang tidak valid
     df_melted = df_melted[df_melted["Tgl Expired"].notnull()].copy()
 
     def get_status(row):
@@ -121,8 +118,36 @@ def load_data():
 
     df_melted["Status"] = df_melted.apply(get_status, axis=1)
 
+    # 2. Baca Sheet2 (Link_Folder)
+    dict_folder = {}
+    try:
+        folder_csv_url = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/gviz/tq?tqx=out:csv&sheet=Link_Folder&t={timestamp}"
+        df_folder = pd.read_csv(folder_csv_url, dtype=str)
+        if (
+            "Nama Kapal" in df_folder.columns
+            and "Link Folder Google Drive" in df_folder.columns
+        ):
+            for _, r in df_folder.iterrows():
+                k_nama = str(r["Nama Kapal"]).strip()
+                k_link = str(r["Link Folder Google Drive"]).strip()
+                if k_nama and k_link and k_link.lower() != "nan":
+                    dict_folder[k_nama] = k_link
+    except:
+        pass
+
+    df_melted["Link Folder"] = df_melted["Nama Kapal"].map(
+        lambda x: dict_folder.get(str(x).strip(), "")
+    )
+
     return df_melted[
-        ["Nama Kapal", "Jenis Surat", "Tgl Expired", "Sisa Hari", "Status"]
+        [
+            "Nama Kapal",
+            "Jenis Surat",
+            "Tgl Expired",
+            "Sisa Hari",
+            "Status",
+            "Link Folder",
+        ]
     ]
 
 
@@ -144,7 +169,6 @@ class PDFReport(FPDF):
         )
         self.ln(5)
 
-        # Header Tabel
         self.set_font("Helvetica", "B", 10)
         self.set_fill_color(220, 220, 220)
         self.cell(65, 8, " Nama Kapal", border=1, fill=True)
@@ -169,15 +193,14 @@ def convert_df_to_pdf(df_data):
     for _, row in df_data.iterrows():
         status = str(row["Status"])
 
-        # Warna background baris berdasarkan status
         if "EXPIRED" in status:
-            pdf.set_fill_color(255, 204, 204)  # Merah tua muda
+            pdf.set_fill_color(255, 204, 204)
         elif "DESAK" in status:
-            pdf.set_fill_color(255, 230, 204)  # Oranye
+            pdf.set_fill_color(255, 230, 204)
         elif "PERINGATAN" in status:
-            pdf.set_fill_color(255, 255, 204)  # Kuning
+            pdf.set_fill_color(255, 255, 204)
         else:
-            pdf.set_fill_color(255, 255, 255)  # Putih
+            pdf.set_fill_color(255, 255, 255)
 
         pdf.cell(
             65,
@@ -286,13 +309,13 @@ try:
     with col_download:
         pdf_bytes = convert_df_to_pdf(df_filtered)
         st.download_button(
-            label="📄 Download PDF",
+            label="📄 Download PDF Laporan",
             data=pdf_bytes,
             file_name=f"Laporan_Surat_Kapal_{datetime.date.today().strftime('%d_%b_%Y')}.pdf",
             mime="application/pdf",
         )
 
-    # Tampilan tabel dengan emoji status untuk UI web
+    # UI Display
     df_display = df_filtered.copy()
     status_emoji_map = {
         "EXPIRED": "🔴 EXPIRED",
@@ -305,7 +328,46 @@ try:
         lambda x: status_emoji_map.get(x, x)
     )
 
-    st.dataframe(df_display, use_container_width=True, hide_index=True)
+    # Tampilkan Tabel Utama (tanpa kolom link folder biar tetap bersih)
+    st.dataframe(
+        df_display[
+            ["Nama Kapal", "Jenis Surat", "Tgl Expired", "Sisa Hari", "Status"]
+        ],
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    # FITUR DIRECT SOFTCOPY SERTIFIKAT VIA LINK FOLDER KAPAL
+    st.markdown("---")
+    st.subheader("📂 Direct Softcopy Sertifikat PDF")
+
+    # Filter pilihan kapal khusus softcopy
+    daftar_kapal_tersedia = list(df_display["Nama Kapal"].unique())
+    pilihan_kapal = st.selectbox(
+        "Pilih Nama Kapal untuk Membuka Folder Softcopy Sertifikat:",
+        options=["-- Pilih Kapal --"] + daftar_kapal_tersedia,
+    )
+
+    if pilihan_kapal != "-- Pilih Kapal --":
+        # Ambil link folder dari data
+        row_kapal = df_display[df_display["Nama Kapal"] == pilihan_kapal].iloc[0]
+        link_folder_kapal = row_kapal["Link Folder"]
+
+        st.info(f"🚢 **Kapal Terpilih:** {pilihan_kapal}")
+
+        if (
+            pd.notnull(link_folder_kapal)
+            and str(link_folder_kapal).strip().startswith("http")
+        ):
+            st.link_button(
+                label=f"📂 Buka Folder Sertifikat PDF ({pilihan_kapal})",
+                url=str(link_folder_kapal).strip(),
+                use_container_width=True,
+            )
+        else:
+            st.warning(
+                f"⚠️ Link folder Google Drive untuk **{pilihan_kapal}** belum dimasukkan di tab sheet 'Link_Folder' pada Google Sheets."
+            )
 
 except Exception as e:
     st.error(f"Gagal membaca data dari Google Sheets.\n\nDetail Error: {e}")
