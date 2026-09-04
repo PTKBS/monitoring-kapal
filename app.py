@@ -11,68 +11,101 @@ st.title("🚢 Dashboard Monitoring Masa Berlaku Surat Kapal")
 st.caption("Aplikasi pemantauan otomatis via Google Sheets (Real-time Live)")
 
 
-# TANPA @st.cache_data agar data ditarik langsung dari Google Sheets
+# TANPA @st.cache_data agar data ditarik langsung dari Google Sheets tanpa cache
 def load_data():
-    # Menambahkan timestamp unik agar URL selalu dianggap baru oleh server (bypass cache)
     timestamp = int(time.time())
     sheet_csv_url = f"https://docs.google.com/spreadsheets/d/1ovR8ZxhQmLYv73iSu1xWEXsG1ipL448fmIhs4zJ8P6o/export?format=csv&t={timestamp}"
 
     # 1. Baca data dari Google Sheets CSV
-    df_raw = pd.read_csv(sheet_csv_url, header=1)
+    df_raw = pd.read_csv(sheet_csv_url, header=None)
 
-    col_jenis_surat = df_raw.columns[0]
-    df_raw = df_raw.rename(columns={col_jenis_surat: "Jenis Surat"})
+    # Cari baris header nama kapal (baris yang memiliki kata 'JENIS SURAT' atau baris ke-2)
+    header_idx = 1
+    for idx, row in df_raw.iterrows():
+        row_str = " ".join(row.astype(str)).upper()
+        if "JENIS SURAT" in row_str or "SURAT" in row_str:
+            header_idx = idx
+            break
 
-    kolom_kapal = [
-        c
-        for c in df_raw.columns[1:]
-        if "Unnamed" not in str(c) and str(c).strip() != ""
+    # Re-read dengan header yang tepat
+    df_data = df_raw.iloc[header_idx + 1 :].copy()
+    raw_headers = df_raw.iloc[header_idx].tolist()
+
+    # Perbaiki nama kolom header agar tidak ada yang terbuang/kosong
+    clean_headers = []
+    last_valid_kapal = "Kapal Unknown"
+
+    for i, h in enumerate(raw_headers):
+        h_str = str(h).strip() if pd.notnull(h) else ""
+        if i == 0:
+            clean_headers.append("Jenis Surat")
+        else:
+            if h_str != "" and "unnamed" not in h_str.lower() and h_str != "nan":
+                last_valid_kapal = h_str
+                clean_headers.append(h_str)
+            else:
+                # Jika kolom tidak punya nama/unnamed, pakai nama kapal sebelumnya
+                clean_headers.append(f"{last_valid_kapal} ({i})")
+
+    df_data.columns = clean_headers
+
+    # Filter baris yang Jenis Surat-nya kosong
+    df_data = df_data.dropna(subset=["Jenis Surat"])
+    df_data = df_data[
+        ~df_data["Jenis Surat"].astype(str).str.strip().isin(["", "nan", "NaN"])
     ]
 
-    # 2. Transpose / Unpivot
+    kolom_kapal = [c for c in clean_headers if c != "Jenis Surat"]
+
+    # 2. Transpose / Unpivot SEMUA Kolom Kapal
     df_melted = pd.melt(
-        df_raw,
+        df_data,
         id_vars=["Jenis Surat"],
         value_vars=kolom_kapal,
         var_name="Nama Kapal",
         value_name="Tgl_Raw",
     )
 
-    df_melted = df_melted.dropna(subset=["Jenis Surat"])
+    # Bersihkan nama kapal dari penanda indeks tambahan jika ada
+    df_melted["Nama Kapal"] = (
+        df_melted["Nama Kapal"].astype(str).str.replace(r"\s\(\d+\)$", "", regex=True)
+    )
     df_melted["Jenis Surat"] = df_melted["Jenis Surat"].astype(str).str.strip()
 
-    # 3. Konversi Tanggal (Format DD/MM/YYYY)
-    def convert_date(val):
-        if pd.isnull(val) or str(val).strip() in [
-            "",
-            "-",
-            "NaN",
-            "nan",
-            "0",
-            "None",
-        ]:
-            return None
+    # Hapus sel tanggal yang kosong / strip (-)
+    df_melted = df_melted[
+        df_melted["Tgl_Raw"].notnull()
+        & ~df_melted["Tgl_Raw"].astype(str).str.strip().isin(["", "-", "None", "nan", "NaN"])
+    ].copy()
 
+    # 3. Konversi Tanggal (DD/MM/YYYY)
+    def parse_flexible_date(val):
         val_str = str(val).strip()
+        if not val_str or val_str in ["-", "nan", "NaN", "0"]:
+            return None, None
+
         parsed = pd.to_datetime(val_str, errors="coerce", dayfirst=True)
 
         if pd.notnull(parsed) and parsed.year > 1980:
-            return parsed.date()
-        return None
+            dt = parsed.date()
+            today = datetime.date.today()
+            sisa = (dt - today).days
+            return dt.strftime("%d-%b-%Y"), sisa
 
-    dt_series = df_melted["Tgl_Raw"].apply(convert_date)
+        return "FORMAT SALAH", 99999
 
-    df_valid = df_melted[dt_series.notnull()].copy()
-    dt_series_valid = dt_series[dt_series.notnull()]
+    parsed_results = df_melted["Tgl_Raw"].apply(parse_flexible_date)
 
-    today = datetime.date.today()
+    df_melted["Tgl Expired"] = [r[0] for r in parsed_results]
+    df_melted["Sisa Hari"] = [r[1] for r in parsed_results]
 
-    df_valid["Tgl Expired"] = dt_series_valid.apply(
-        lambda x: x.strftime("%d-%b-%Y")
-    )
-    df_valid["Sisa Hari"] = dt_series_valid.apply(lambda x: (x - today).days)
+    def get_status(row):
+        tgl_str = row["Tgl Expired"]
+        sisa = row["Sisa Hari"]
 
-    def get_status(sisa):
+        if tgl_str == "FORMAT SALAH":
+            return "⚠️ FORMAT TANGGAL SALAH"
+
         sisa = int(sisa)
         if sisa <= 0:
             return "🔴 EXPIRED"
@@ -83,9 +116,9 @@ def load_data():
         else:
             return "🟢 AMAN"
 
-    df_valid["Status"] = df_valid["Sisa Hari"].apply(get_status)
+    df_melted["Status"] = df_melted.apply(get_status, axis=1)
 
-    return df_valid[
+    return df_melted[
         ["Nama Kapal", "Jenis Surat", "Tgl Expired", "Sisa Hari", "Status"]
     ]
 
@@ -105,12 +138,24 @@ try:
     total_aman = len(
         df[df["Status"].str.contains("AMAN", case=False, na=False)]
     )
+    total_error = len(
+        df[
+            df["Status"].str.contains(
+                "FORMAT TANGGAL SALAH", case=False, na=False
+            )
+        ]
+    )
 
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("🔴 Expired", f"{total_expired} Surat")
     col2.metric("🚨 Sangat Desak (H-14)", f"{total_desak} Surat")
     col3.metric("🟡 Peringatan (H-30)", f"{total_warning} Surat")
     col4.metric("🟢 Aman", f"{total_aman} Surat")
+
+    if total_error > 0:
+        st.warning(
+            f"⚠️ Ada {total_error} surat yang format tanggalnya di Google Sheets tidak terbaca/salah ketik. Cek tabel di bawah!"
+        )
 
     st.markdown("---")
 
@@ -122,12 +167,12 @@ try:
 
     kapal_options = list(df["Nama Kapal"].unique())
     selected_kapal = st.sidebar.multiselect(
-        "Filter Nama Kapal:", options=kapal_options, default=kapal_options
+        "Filter Nama Kapal:", options=kapal_options, default_kapal=kapal_options
     )
 
     surat_options = list(df["Jenis Surat"].unique())
     selected_surat = st.sidebar.multiselect(
-        "Filter Jenis Surat:", options=surat_options, default=surat_options
+        "Filter Jenis Surat:", options=surat_options, default_surat_options
     )
 
     df_filtered = df[
