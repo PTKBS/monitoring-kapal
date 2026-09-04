@@ -122,12 +122,12 @@ try:
 
     kapal_options = list(df["Nama Kapal"].unique())
     selected_kapal = st.sidebar.multiselect(
-        "Filter Nama Kapal:", options=kapal_options, default_kapal=kapal_options
+        "Filter Nama Kapal:", options=kapal_options, default=kapal_options
     )
 
     surat_options = list(df["Jenis Surat"].unique())
     selected_surat = st.sidebar.multiselect(
-        "Filter Jenis Surat:", options=surat_options, default_surat_options
+        "Filter Jenis Surat:", options=surat_options, default=surat_options
     )
 
     df_filtered = df[
