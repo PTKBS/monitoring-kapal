@@ -323,10 +323,10 @@ try:
         & (df["Jenis Surat"].isin(selected_surat))
     ]
 
-    if "Sisa Hari" in df_filtered.columns:
-        df_filtered = df_filtered.sort_values(
-            by="Sisa Hari", ascending=True, na_position="last"
-        )
+    # URUTKAN BERDASARKAN NAMA KAPAL DULU, LALU SISA HARI / EXPIRATION
+    df_filtered = df_filtered.sort_values(
+        by=["Nama Kapal", "Sisa Hari"], ascending=[True, True], na_position="last"
+    )
 
     col_title, col_download = st.columns([3, 1])
 
