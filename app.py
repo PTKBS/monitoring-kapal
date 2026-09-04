@@ -11,18 +11,18 @@ st.title("🚢 Dashboard Monitoring Masa Berlaku Surat Kapal")
 st.caption("Aplikasi pemantauan otomatis via Google Sheets (Real-time Live)")
 
 
-# TANPA @st.cache_data agar data ditarik langsung dari Google Sheets tanpa cache
 def load_data():
     timestamp = int(time.time())
     sheet_csv_url = f"https://docs.google.com/spreadsheets/d/1ovR8ZxhQmLYv73iSu1xWEXsG1ipL448fmIhs4zJ8P6o/export?format=csv&t={timestamp}"
 
-    # 1. Baca data dari Google Sheets CSV
-    df_raw = pd.read_csv(sheet_csv_url, header=None)
+    # 1. Baca data dari Google Sheets CSV (pastikan semua dibaca sebagai object/string)
+    df_raw = pd.read_csv(sheet_csv_url, header=None, dtype=str)
 
     # Cari baris header nama kapal (baris yang memiliki kata 'JENIS SURAT' atau baris ke-2)
     header_idx = 1
     for idx, row in df_raw.iterrows():
-        row_str = " ".join(row.astype(str)).upper()
+        # Konversi setiap elemen di row ke str secara aman
+        row_str = " ".join([str(val) for val in row if pd.notnull(val)]).upper()
         if "JENIS SURAT" in row_str or "SURAT" in row_str:
             header_idx = idx
             break
@@ -44,7 +44,6 @@ def load_data():
                 last_valid_kapal = h_str
                 clean_headers.append(h_str)
             else:
-                # Jika kolom tidak punya nama/unnamed, pakai nama kapal sebelumnya
                 clean_headers.append(f"{last_valid_kapal} ({i})")
 
     df_data.columns = clean_headers
@@ -66,7 +65,7 @@ def load_data():
         value_name="Tgl_Raw",
     )
 
-    # Bersihkan nama kapal dari penanda indeks tambahan jika ada
+    # Bersihkan nama kapal dari penanda indeks tambahan
     df_melted["Nama Kapal"] = (
         df_melted["Nama Kapal"].astype(str).str.replace(r"\s\(\d+\)$", "", regex=True)
     )
