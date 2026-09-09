@@ -285,8 +285,8 @@ def convert_df_to_pdf(df_data):
 try:
     df = load_data()
 
-    # ---------------------------------------------------------
-    # SIDEBAR: FITUR UPDATE TANGGAL SURAT
+# ---------------------------------------------------------
+    # SIDEBAR: FITUR UPDATE TANGGAL SURAT (DROPDOWN DATE, MONTH, YEAR)
     # ---------------------------------------------------------
     st.sidebar.header("✏️ Update Tanggal Surat")
     with st.sidebar.form("form_update_tgl"):
@@ -299,16 +299,34 @@ try:
         )
         selected_surat_input = st.selectbox("Pilih Jenis Surat:", list_surat_by_kapal)
 
-        tgl_baru = st.date_input("Tanggal Expired Baru:", datetime.date.today())
+        st.markdown("**Tanggal Expired Baru:**")
+        col_d, col_m, col_y = st.columns([1, 1, 1])
+        
+        today = datetime.date.today()
+        
+        with col_d:
+            day_val = st.selectbox("Tgl", list(range(1, 32)), index=today.day - 1)
+        with col_m:
+            months = [
+                "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+                "Juli", "Agustus", "September", "Oktober", "November", "Desember"
+            ]
+            month_val = st.selectbox("Bulan", range(1, 13), format_func=lambda x: months[x-1], index=today.month - 1)
+        with col_y:
+            current_year = today.year
+            year_val = st.selectbox("Tahun", list(range(current_year - 2, current_year + 15)), index=2)
 
         btn_update = st.form_submit_button("💾 Update ke Google Sheets")
 
     if btn_update:
         try:
+            # Validasi tanggal (misal 31 Februari)
+            tgl_baru = datetime.date(year_val, month_val, day_val)
+            
             with st.spinner("Memperbarui data di Google Sheets..."):
                 gc = get_gspread_client()
                 sh = gc.open_by_key(SPREADSHEET_ID)
-                worksheet = sh.sheet1  # Asumsi sheet utama ada di tab pertama
+                worksheet = sh.sheet1
 
                 # 1. Cari Baris (Row) dari Jenis Surat
                 cell_surat = worksheet.find(selected_surat_input)
@@ -322,7 +340,7 @@ try:
                         break
 
                 if cell_surat and col_idx:
-                    # Update Cell Pertemuan Baris Surat & Kolom Kapal (Format DD/MM/YYYY)
+                    # Format tanggal disimpan ke Google Sheets (DD/MM/YYYY)
                     formatted_date = tgl_baru.strftime("%d/%m/%Y")
                     worksheet.update_cell(cell_surat.row, col_idx, formatted_date)
 
@@ -330,9 +348,10 @@ try:
                     st.rerun()
                 else:
                     st.sidebar.error("❌ Nama Kapal atau Jenis Surat tidak ditemukan di posisi layout Google Sheets.")
+        except ValueError:
+            st.sidebar.error("⚠️ Kombinasi tanggal tidak valid (misal: 31 Februari). Silakan cek kembali!")
         except Exception as e_update:
             st.sidebar.error(f"Gagal Update Data: {e_update}")
-
     st.sidebar.markdown("---")
 
     # Metrics
