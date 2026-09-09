@@ -5,6 +5,8 @@ from dateutil.relativedelta import relativedelta
 from fpdf import FPDF
 import pandas as pd
 import streamlit as st
+import gspread
+from google.oauth2.service_account import Credentials
 
 st.set_page_config(
     page_title="Monitoring Surat Kapal", page_icon="🚢", layout="wide"
@@ -15,6 +17,21 @@ st.caption("Aplikasi pemantauan otomatis via Google Sheets (Real-time Live)")
 
 # Spreadsheet ID
 SPREADSHEET_ID = "1ovR8ZxhQmLYv73iSu1xWEXsG1ipL448fmIhs4zJ8P6o"
+
+# ---------------------------------------------------------
+# KONEKSI GSPREAD UNTUK WRITE DATA
+# ---------------------------------------------------------
+@st.cache_resource
+def get_gspread_client():
+    scope = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ]
+    creds = Credentials.from_service_account_info(
+        st.secrets["gcp_service_account"], 
+        scopes=scope
+    )
+    return gspread.authorize(creds)
 
 
 def load_data():
@@ -268,6 +285,57 @@ def convert_df_to_pdf(df_data):
 try:
     df = load_data()
 
+    # ---------------------------------------------------------
+    # SIDEBAR: FITUR UPDATE TANGGAL SURAT
+    # ---------------------------------------------------------
+    st.sidebar.header("✏️ Update Tanggal Surat")
+    with st.sidebar.form("form_update_tgl"):
+        list_kapal = sorted(list(df["Nama Kapal"].unique()))
+        selected_kapal_input = st.selectbox("Pilih Kapal:", list_kapal)
+
+        # Filter Jenis Surat sesuai Kapal yang dipilih
+        list_surat_by_kapal = sorted(
+            list(df[df["Nama Kapal"] == selected_kapal_input]["Jenis Surat"].unique())
+        )
+        selected_surat_input = st.selectbox("Pilih Jenis Surat:", list_surat_by_kapal)
+
+        tgl_baru = st.date_input("Tanggal Expired Baru:", datetime.date.today())
+
+        btn_update = st.form_submit_button("💾 Update ke Google Sheets")
+
+    if btn_update:
+        try:
+            with st.spinner("Memperbarui data di Google Sheets..."):
+                gc = get_gspread_client()
+                sh = gc.open_by_key(SPREADSHEET_ID)
+                worksheet = sh.sheet1  # Asumsi sheet utama ada di tab pertama
+
+                # 1. Cari Baris (Row) dari Jenis Surat
+                cell_surat = worksheet.find(selected_surat_input)
+
+                # 2. Cari Kolom (Column) dari Nama Kapal di Baris Header (Baris ke-2)
+                row_header = worksheet.row_values(2)
+                col_idx = None
+                for idx, val in enumerate(row_header, start=1):
+                    if selected_kapal_input.lower() in val.lower():
+                        col_idx = idx
+                        break
+
+                if cell_surat and col_idx:
+                    # Update Cell Pertemuan Baris Surat & Kolom Kapal (Format DD/MM/YYYY)
+                    formatted_date = tgl_baru.strftime("%d/%m/%Y")
+                    worksheet.update_cell(cell_surat.row, col_idx, formatted_date)
+
+                    st.sidebar.success(f"✅ Berhasil update {selected_surat_input} ({selected_kapal_input}) -> {formatted_date}")
+                    st.rerun()
+                else:
+                    st.sidebar.error("❌ Nama Kapal atau Jenis Surat tidak ditemukan di posisi layout Google Sheets.")
+        except Exception as e_update:
+            st.sidebar.error(f"Gagal Update Data: {e_update}")
+
+    st.sidebar.markdown("---")
+
+    # Metrics
     total_expired = len(
         df[df["Status"].str.contains("EXPIRED", case=False, na=False)]
     )
@@ -355,7 +423,7 @@ try:
         lambda x: status_emoji_map.get(x, x)
     )
 
-    # Tampilkan Tabel Utama dengan Konfigurasi Lebar Sesuai Permintaan
+    # Tampilkan Tabel Utama
     st.dataframe(
         df_display[
             [
@@ -370,12 +438,12 @@ try:
         use_container_width=True,
         hide_index=True,
         column_config={
-            "Nama Kapal": st.column_config.TextColumn("Nama Kapal"),  # Otomatis pas
-            "Jenis Surat": st.column_config.TextColumn("Jenis Surat", width="medium"),  # Tetap medium
-            "Tgl Expired": st.column_config.TextColumn("Tgl Expired"),  # Otomatis pas
-            "Sisa Hari": st.column_config.NumberColumn("Sisa Hari", width="small"),  # Kecil
-            "Status": st.column_config.TextColumn("Status", width="small"),  # Kecil
-            "Window Endorse (±3 Bln)": st.column_config.TextColumn("Window Endorse (±3 Bln)"),  # Otomatis pas
+            "Nama Kapal": st.column_config.TextColumn("Nama Kapal"),
+            "Jenis Surat": st.column_config.TextColumn("Jenis Surat", width="medium"),
+            "Tgl Expired": st.column_config.TextColumn("Tgl Expired"),
+            "Sisa Hari": st.column_config.NumberColumn("Sisa Hari", width="small"),
+            "Status": st.column_config.TextColumn("Status", width="small"),
+            "Window Endorse (±3 Bln)": st.column_config.TextColumn("Window Endorse (±3 Bln)"),
         },
     )
 
