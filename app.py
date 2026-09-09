@@ -16,7 +16,7 @@ st.set_page_config(
 )
 
 # Ganti dengan SPREADSHEET_ID milikmu
-SPREADSHEET_ID = "1..."  # Masukkan Spreadsheet ID kamu di sini jika belum
+SPREADSHEET_ID = "1ovR8ZxhQmLYv73iSu1xWEXsG1ipL448fmIhs4zJ8P6o"  # Masukkan Spreadsheet ID kamu di sini jika belum
 
 # ---------------------------------------------------------
 # KONEKSI GOOGLE SHEETS VIA STREAMLIT SECRETS
