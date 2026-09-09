@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import gspread
-from google.oauth2.service_account import Credentials
 
 # --- 1. KONFIGURASI HALAMAN STREAMLIT ---
 st.set_page_config(
@@ -12,38 +11,26 @@ st.set_page_config(
 
 st.title("🚢 Aplikasi Monitoring Kapal & Surat")
 
-# --- 2. KONEKSI KE GOOGLE SHEETS VIA STREAMLIT SECRETS ---
+# --- 2. KONEKSI GOOGLE SHEETS (BEBAS BUG RESPONSE 200) ---
 @st.cache_resource
-def get_gspread_client():
-    scopes = [
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive"
-    ]
-    credentials = Credentials.from_service_account_info(
-        st.secrets["gcp_service_account"],
-        scopes=scopes
-    )
-    return gspread.authorize(credentials)
+def get_worksheet():
+    # Menggunakan metode autentikasi langsung dari dict secrets (bebas bug Response 200)
+    credentials = dict(st.secrets["gcp_service_account"])
+    
+    # Memperbaiki format private_key jika ada masukan string newline
+    if "private_key" in credentials:
+        credentials["private_key"] = credentials["private_key"].replace("\\n", "\n")
+        
+    gc = gspread.service_account_from_dict(credentials)
+    
+    # MASUKKAN SPREADSHEET ID KAMU DI SINI (diambil dari URL browser antara /d/ dan /edit)
+    SPREADSHEET_ID = "PASTE_ID_SPREADSHEET_KAMU_DI_SINI"
+    
+    sh = gc.open_by_key(SPREADSHEET_ID)
+    return sh.sheet1
 
 try:
-    gc = get_gspread_client()
-    
-    # 💡 Ganti string di bawah dengan SPREADSHEET ID dari URL Google Sheets kamu
-    SPREADSHEET_ID = "1ovR8ZxhQmLYv73iSu1xWEXsG1ipL448fmIhs4zJ8P6o"
-    
-    sh = gc.open_by_key(SPREADSHEET_ID) 
-    worksheet = sh.sheet1
-except Exception as e:
-    st.error(f"⚠️ Gagal terhubung ke Google Sheets: {e}")
-    st.stop()
-
-try:
-    gc = get_gspread_client()
-    
-    # OPSIONAL: Ganti nama spreadsheet di bawah ini jika nama filenya berbeda, 
-    # atau gunakan: sh = gc.open_by_key("ID_SPREADSHEET_KAMU")
-    sh = gc.open("Monitoring Kapal") 
-    worksheet = sh.sheet1
+    worksheet = get_worksheet()
 except Exception as e:
     st.error(f"⚠️ Gagal terhubung ke Google Sheets: {e}")
     st.stop()
@@ -68,19 +55,17 @@ def load_data():
 df = load_data()
 
 # --- 4. EKSTRAKSI LIST KAPAL & SURAT UNTUK DROPDOWN ---
-# Silakan sesuaikan string 'Nama Kapal' & 'Nama Surat' jika di Sheet tulisan kapitalnya berbeda
 kolom_kapal = "Nama Kapal" if "Nama Kapal" in df.columns else (df.columns[0] if len(df.columns) > 0 else "")
 kolom_surat = "Nama Surat" if "Nama Surat" in df.columns else (df.columns[1] if len(df.columns) > 1 else "")
 
 if not df.empty and kolom_kapal in df.columns and kolom_surat in df.columns:
-    # Ambil nilai unik dan buang string kosong/NaN
     list_kapal = [k for k in df[kolom_kapal].dropna().unique().tolist() if str(k).strip() != ""]
     list_surat = [s for s in df[kolom_surat].dropna().unique().tolist() if str(s).strip() != ""]
 else:
     list_kapal = []
     list_surat = []
 
-# Fallback jika data di sheet masih kosong / belum ada opsi
+# Opsi cadangan jika sheet masih kosong
 if not list_kapal:
     list_kapal = ["Tugboat A", "Tugboat B", "Barge C"]
 if not list_surat:
@@ -105,7 +90,6 @@ with st.form(key="form_input_kapal", clear_on_submit=True):
 
 if submit_button:
     try:
-        # Menyiapkan baris data baru sesuai urutan kolom di sheet
         new_row = [
             selected_kapal,
             selected_surat,
