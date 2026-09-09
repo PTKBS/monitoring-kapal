@@ -36,7 +36,6 @@ except Exception as e:
 
 # --- 3. BACA & TRANSFORMASI DATA MATRIKS ---
 def load_raw_matrix():
-    """Mengambil raw data dari Google Sheets"""
     return worksheet.get_all_values()
 
 def load_and_transform_matrix_data(raw_data):
@@ -47,7 +46,6 @@ def load_and_transform_matrix_data(raw_data):
     header_row = raw_data[1] 
     kapal_list = [str(h).strip() for h in header_row[1:] if str(h).strip() != ""]
     
-    # Baris 3 ke bawah = Jenis Surat
     rows_data = raw_data[2:]
     surat_list = []
     
@@ -64,7 +62,6 @@ def load_and_transform_matrix_data(raw_data):
             
         surat_list.append(jenis_surat)
             
-        # Iterasi per kapal
         for col_idx, kapal_name in enumerate(header_row[1:], start=1):
             kapal_name = str(kapal_name).strip()
             if not kapal_name:
@@ -80,7 +77,7 @@ def load_and_transform_matrix_data(raw_data):
                     tgl_exp_fmt = exp_dt.strftime("%d-%b-%Y")
                     sisa_hari_fmt = f"{sisa_hari_num} h"
                     
-                    # Penentuan Status
+                    # Status
                     if sisa_hari_num < 0:
                         status_str = "EXPIRED"
                         cat_status = "EXPIRED"
@@ -123,7 +120,10 @@ def load_and_transform_matrix_data(raw_data):
 raw_data = load_raw_matrix()
 df_table, list_kapal_all, list_surat_all = load_and_transform_matrix_data(raw_data)
 
-# --- 4. RINGKASAN METRIK / BADGE RINGKASAN (KPI CARDS) ---
+# Inisialisasi filtered_df dari awal
+filtered_df = df_table.copy() if not df_table.empty else pd.DataFrame()
+
+# --- 4. RINGKASAN METRIK / BADGE SUMMARY ---
 if not df_table.empty:
     cnt_expired = len(df_table[df_table['Cat_Status'] == "EXPIRED"])
     cnt_desak = len(df_table[df_table['Cat_Status'] == "DESAK"])
@@ -142,6 +142,18 @@ if not df_table.empty:
 
     st.divider()
 
+# --- 5. SIDEBAR: FILTER & FORM UPDATE ---
+st.sidebar.header("🔍 Filter Data")
+
+if not df_table.empty:
+    selected_kapal = st.sidebar.multiselect("Filter Kapal", options=list_kapal_all, default=list_kapal_all)
+    selected_surat = st.sidebar.multiselect("Filter Jenis Surat", options=list_surat_all, default=list_surat_all)
+    
+    if selected_kapal:
+        filtered_df = filtered_df[filtered_df['Nama Kapal'].isin(selected_kapal)]
+    if selected_surat:
+        filtered_df = filtered_df[filtered_df['Jenis Surat'].isin(selected_surat)]
+
 # FORM UPDATE TANGGAL DI SIDEBAR
 st.sidebar.divider()
 st.sidebar.header("📝 Update Tanggal Surat")
@@ -149,13 +161,12 @@ with st.sidebar.form("form_update_tanggal", clear_on_submit=True):
     input_kapal = st.selectbox("Pilih Kapal", options=["-- Pilih Kapal --"] + list_kapal_all)
     input_surat = st.selectbox("Pilih Jenis Surat", options=["-- Pilih Surat --"] + list_surat_all)
     
-    # 💡 Tambahkan parameter format="DD/MM/YYYY" di sini!
+    # Format Tanggal Indonesia (DD/MM/YYYY)
     input_tgl = st.date_input(
         "Tanggal Expired Baru", 
         value=datetime.now(), 
         format="DD/MM/YYYY"
     )
-    
     btn_submit = st.form_submit_button("💾 Simpan Tanggal Ke Google Sheets")
 
 if btn_submit:
@@ -163,17 +174,14 @@ if btn_submit:
         st.sidebar.error("⚠️ Silakan pilih Kapal dan Jenis Surat yang valid!")
     else:
         try:
-            # Cari posisi Baris (Jenis Surat) & Kolom (Nama Kapal) di Sheet
             header_row = raw_data[1]
             
-            # Kolom Kapal (1-indexed di gspread)
             col_target = None
             for idx, k in enumerate(header_row):
                 if str(k).strip() == input_kapal:
                     col_target = idx + 1
                     break
             
-            # Baris Surat (1-indexed di gspread)
             row_target = None
             for idx, r in enumerate(raw_data):
                 if len(r) > 0 and str(r[0]).strip() == input_surat:
@@ -181,7 +189,6 @@ if btn_submit:
                     break
             
             if row_target and col_target:
-                # Format yang dikirim ke Google Sheets (Tgl-Bln-Thn)
                 tgl_formatted = input_tgl.strftime("%d-%m-%Y")
                 worksheet.update_cell(row_target, col_target, tgl_formatted)
                 st.sidebar.success(f"✅ Tanggal {input_surat} ({input_kapal}) berhasil diupdate ke {tgl_formatted}!")
@@ -196,31 +203,27 @@ if btn_submit:
 st.subheader("📋 Daftar Status Surat Kapal")
 
 if not filtered_df.empty:
-    # 1. Sertakan 'Cat_Status' ke dalam show_df agar bisa dibaca oleh fungsi styling
     show_df = filtered_df[["Nama Kapal", "Jenis Surat", "Tgl Expired", "Sisa Hari", "Status", "Window Endorse (±3 Bln)", "Cat_Status"]].copy()
 
-    # 2. Fungsi penanda warna per baris
     def highlight_rows(row):
         cat = row['Cat_Status']
         if cat == 'EXPIRED':
-            return ['background-color: #ffcccc; color: #8b0000; font-weight: bold;'] * len(row) # Merah
+            return ['background-color: #ffcccc; color: #8b0000; font-weight: bold;'] * len(row)
         elif cat == 'DESAK':
-            return ['background-color: #ffe6cc; color: #b35900; font-weight: bold;'] * len(row) # Oranye
+            return ['background-color: #ffe6cc; color: #b35900; font-weight: bold;'] * len(row)
         elif cat == 'KRITIS':
-            return ['background-color: #ffffcc; color: #808000;'] * len(row) # Kuning
+            return ['background-color: #ffffcc; color: #808000;'] * len(row)
         else:
             return [''] * len(row)
 
-    # 3. Terapkan styling SEBELUM menyembunyikan kolom 'Cat_Status' dari layar
     styled_df = show_df.style.apply(highlight_rows, axis=1)
 
-    # 4. Tampilkan di Streamlit dengan column_config untuk menyembunyikan 'Cat_Status' agar tidak muncul di layar
     st.dataframe(
         styled_df,
         use_container_width=True,
         hide_index=True,
         column_config={
-            "Cat_Status": None  # <--- Ini triknya! Menyembunyikan kolom tanpa menghapusnya dari data
+            "Cat_Status": None
         }
     )
 else:
@@ -239,7 +242,6 @@ if not filtered_df.empty:
         pdf.cell(277, 5, text=f"Tanggal Cetak: {datetime.now().strftime('%d-%b-%Y')}", new_x="LMARGIN", new_y="NEXT", align='C')
         pdf.ln(4)
 
-        # Header Tabel PDF
         pdf.set_font("Helvetica", 'B', 8)
         w = [45, 65, 30, 25, 45, 67]
         headers = ["Nama Kapal", "Jenis Surat", "Tgl Expired", "Sisa Hari", "Status", "Window Endorse (±3 Bln)"]
@@ -247,7 +249,6 @@ if not filtered_df.empty:
             pdf.cell(w[i], 7, text=h, border=1, align='C')
         pdf.ln()
 
-        # Isi PDF
         pdf.set_font("Helvetica", '', 7)
         for _, row in dataframe.iterrows():
             pdf.cell(w[0], 6, text=str(row['Nama Kapal'])[:25], border=1)
