@@ -6,12 +6,12 @@ from fpdf import FPDF
 
 # --- 1. KONFIGURASI HALAMAN ---
 st.set_page_config(
-    page_title="Monitoring Kapal & Surat",
+    page_title="Monitoring Surat Kapal & Endorsement",
     page_icon="🚢",
     layout="wide"
 )
 
-st.title("🚢 Aplikasi Monitoring Surat Kapal")
+st.title("🚢 Dashboard Monitoring Surat Kapal & Endorsement")
 
 # --- 2. KONEKSI GOOGLE SHEETS ---
 @st.cache_resource
@@ -22,8 +22,8 @@ def get_worksheet():
         
     gc = gspread.service_account_from_dict(credentials)
     
-    # 💡 PASTE SPREADSHEET ID KAMU DI SINI (dari URL browser)
-    SPREADSHEET_ID = "1ovR8ZxhQmLYv73iSu1xWEXsG1ipL448fmIhs4zJ8P6o"
+    # 💡 PASTE SPREADSHEET ID KAMU DI SINI
+    SPREADSHEET_ID = "PASTE_ID_SPREADSHEET_KAMU_DI_SINI"
     
     sh = gc.open_by_key(SPREADSHEET_ID)
     return sh.sheet1
@@ -34,22 +34,21 @@ except Exception as e:
     st.error(f"⚠️ Gagal terhubung ke Google Sheets: {e}")
     st.stop()
 
-# --- 3. FUNGSI BACA DATA (HEADER DI BARIS 2 ATAU BARIS 1) ---
+# --- 3. BACA DATA (MENDUKUNG HEADER BARIS 2 / BARIS 1) ---
 def load_data():
     raw_data = worksheet.get_all_values()
     if not raw_data:
         return pd.DataFrame()
     
-    # Jika baris 1 kosong atau berupa judul, gunakan baris 2 sebagai header
+    # Deteksi apakah baris 2 adalah header kapal
     if len(raw_data) >= 2 and any("kapal" in str(cell).lower() for cell in raw_data[1]):
         headers = [str(h).strip() for h in raw_data[1]]
         data_rows = raw_data[2:] if len(raw_data) > 2 else []
     else:
-        # Fallback: gunakan baris 1 sebagai header jika baris 2 bukan header kapal
         headers = [str(h).strip() for h in raw_data[0]]
         data_rows = raw_data[1:] if len(raw_data) > 1 else []
     
-    # Buat header unik jika ada kolom kosong
+    # Beri nama unik jika ada header kosong
     headers = [h if h != "" else f"Kolom_{i+1}" for i, h in enumerate(headers)]
     
     df = pd.DataFrame(data_rows, columns=headers)
@@ -57,145 +56,157 @@ def load_data():
 
 df = load_data()
 
-# --- 4. PERHITUNGAN STATUS EXPIRED & SISA HARI ---
-# Inisialisasi kolom default agar tidak terjadi KeyError
-df['Status Surat'] = "⚪ Tanpa Tanggal"
-df['Sisa Hari'] = "-"
+# --- 4. IDENTIFIKASI KOLOM KUNCI ---
+col_kapal = next((c for c in df.columns if "kapal" in c.lower()), df.columns[0] if not df.empty else "Nama Kapal")
+col_surat = next((c for c in df.columns if "surat" in c.lower()), df.columns[1] if len(df.columns) > 1 else "Nama Surat")
+col_exp = next((c for c in df.columns if any(k in c.lower() for k in ["exp", "kadaluarsa", "berlaku", "tanggal", "tgl"])), None)
 
-if not df.empty:
-    col_kapal = next((c for c in df.columns if "kapal" in c.lower()), df.columns[0])
-    col_surat = next((c for c in df.columns if "surat" in c.lower()), df.columns[1] if len(df.columns) > 1 else df.columns[0])
+# --- 5. LOGIKA PERHITUNGAN EXPIRED, ENDORSEMENT, & SISA HARI ---
+today = datetime.now()
+
+if not df.empty and col_exp and col_exp in df.columns:
+    df['Exp_Date'] = pd.to_datetime(df[col_exp], errors='coerce')
+    df['Sisa_Hari_Num'] = (df['Exp_Date'] - today).dt.days
     
-    # Cari nama kolom yang mengandung kata kunci expired/kadaluarsa/berlaku/tgl
-    col_exp = next((c for c in df.columns if any(k in c.lower() for k in ["exp", "kadaluarsa", "berlaku", "tanggal", "tgl"])), None)
-    
-    # Fallback jika kolom tidak ketemu lewat kata kunci
-    if not col_exp and len(df.columns) >= 4:
-        col_exp = df.columns[3]
-    
-    if col_exp and col_exp in df.columns:
-        df['Exp_Date'] = pd.to_datetime(df[col_exp], errors='coerce')
-        today = datetime.now()
-        
-        # Hitung sisa hari
-        sisa_hari_numeric = (df['Exp_Date'] - today).dt.days
-        
-        def check_status(days):
-            if pd.isna(days):
-                return "⚪ Tanpa Tanggal"
-            elif days < 0:
-                return "🔴 EXPIRED"
-            elif days <= 30:
-                return "🟡 Kritis (<= 30 Hari)"
-            elif days <= 60:
-                return "🔵 Perhatian (<= 60 Hari)"
-            else:
-                return "🟢 Aman"
-                
-        df['Status Surat'] = sisa_hari_numeric.apply(check_status)
-        df['Sisa Hari'] = sisa_hari_numeric.apply(lambda x: f"{int(x)} Hari" if pd.notna(x) else "-")
+    def calculate_status(days):
+        if pd.isna(days):
+            return "⚪ Tanpa Tanggal"
+        elif days < 0:
+            return "🔴 EXPIRED"
+        elif days <= 15:
+            return "🚨 Sangat Kritis (<= 15 Hari)"
+        elif days <= 30:
+            return "🟡 Kritis (<= 30 Hari)"
+        elif days <= 90:
+            return "🔵 Perlu Endorse (Masa Endorse <= 3 Bulan)"
+        else:
+            return "🟢 Aman (> 3 Bulan / Sesudah Endorse)"
+
+    df['Status Surat'] = df['Sisa_Hari_Num'].apply(calculate_status)
+    df['Sisa Hari'] = df['Sisa_Hari_Num'].apply(lambda x: f"{int(x)} Hari" if pd.notna(x) else "-")
 else:
-    col_kapal = "Nama Kapal"
-    col_surat = "Nama Surat"
+    df['Status Surat'] = "⚪ Tanpa Tanggal"
+    df['Sisa Hari'] = "-"
+    df['Sisa_Hari_Num'] = None
 
-# --- 5. EKSTRAKSI DROPDOWN NAMA KAPAL & SURAT ---
-if not df.empty and col_kapal in df.columns and col_surat in df.columns:
-    list_kapal = [k for k in df[col_kapal].dropna().unique().tolist() if str(k).strip() != ""]
-    list_surat = [s for s in df[col_surat].dropna().unique().tolist() if str(s).strip() != ""]
+# --- 6. DYNAMIC DROPDOWN FILTER (UNTUK FILTER TAMPILAN) ---
+st.sidebar.header("🔍 Filter Tampilan Data")
+
+if not df.empty and col_kapal in df.columns:
+    unique_kapal = sorted([k for k in df[col_kapal].dropna().unique().tolist() if str(k).strip() != ""])
+    filter_kapal = st.sidebar.multiselect("Pilih Nama Kapal", options=unique_kapal, default=unique_kapal)
 else:
-    list_kapal, list_surat = [], []
+    filter_kapal = []
 
-if not list_kapal: list_kapal = ["Tugboat A", "Tugboat B", "Barge C"]
-if not list_surat: list_surat = ["Sertifikat Keselamatan", "PAS Besar", "Izin Layak Laut"]
+if not df.empty and col_surat in df.columns:
+    unique_surat = sorted([s for s in df[col_surat].dropna().unique().tolist() if str(s).strip() != ""])
+    filter_surat = st.sidebar.multiselect("Pilih Nama Surat", options=unique_surat, default=unique_surat)
+else:
+    filter_surat = []
 
-# --- 6. FORM INPUT DATA BARU ---
-st.subheader("📝 Input / Update Surat Kapal")
-with st.form(key="form_input_kapal", clear_on_submit=True):
-    col1, col2 = st.columns(2)
-    with col1:
-        selected_kapal = st.selectbox("Pilih Nama Kapal", options=list_kapal)
-        selected_surat = st.selectbox("Pilih Nama Surat", options=list_surat)
-    with col2:
-        tgl_terbit = st.date_input("Tanggal Terbit")
-        tgl_kadaluarsa = st.date_input("Tanggal Kadaluarsa / Expired")
-        keterangan = st.text_input("Keterangan Catatan")
+# Tapis Data Berdasarkan Filter Sidebar
+filtered_df = df.copy()
+if filter_kapal:
+    filtered_df = filtered_df[filtered_df[col_kapal].isin(filter_kapal)]
+if filter_surat:
+    filtered_df = filtered_df[filtered_df[col_surat].isin(filter_surat)]
 
-    submit_button = st.form_submit_button(label="💾 Simpan Data ke Google Sheets")
+# --- 7. FORM INPUT & UPDATE DATA ---
+st.subheader("📝 Input / Update Data Surat Kapal")
+with st.expander("Klik di sini untuk Tambah Data Baru ke Google Sheets"):
+    with st.form(key="form_input_kapal", clear_on_submit=True):
+        c_in1, c_in2 = st.columns(2)
+        with c_in1:
+            input_kapal = st.selectbox("Nama Kapal", options=unique_kapal if unique_kapal else ["Tugboat A", "Barge B"])
+            input_surat = st.selectbox("Nama Surat", options=unique_surat if unique_surat else ["PAS Besar", "Sertifikat Keselamatan"])
+        with c_in2:
+            tgl_terbit = st.date_input("Tanggal Terbit")
+            tgl_kadaluarsa = st.date_input("Tanggal Kadaluarsa / Expired")
+            keterangan = st.text_input("Keterangan Catatan")
 
-if submit_button:
-    try:
-        new_row = [
-            selected_kapal,
-            selected_surat,
-            tgl_terbit.strftime("%Y-%m-%d"),
-            tgl_kadaluarsa.strftime("%Y-%m-%d"),
-            keterangan
-        ]
-        worksheet.append_row(new_row)
-        st.success(f"✅ Data **{selected_kapal}** - **{selected_surat}** berhasil disimpan!")
-        st.cache_resource.clear()
-        st.rerun()
-    except Exception as err:
-        st.error(f"❌ Gagal menyimpan data: {err}")
+        submit_btn = st.form_submit_button("💾 Simpan Data ke Google Sheets")
 
-# --- 7. TAMPILAN MONITORING & RINGKASAN STATUS ---
+    if submit_btn:
+        try:
+            new_row = [
+                input_kapal,
+                input_surat,
+                tgl_terbit.strftime("%Y-%m-%d"),
+                tgl_kadaluarsa.strftime("%Y-%m-%d"),
+                keterangan
+            ]
+            worksheet.append_row(new_row)
+            st.success(f"✅ Data {input_kapal} - {input_surat} berhasil disimpan!")
+            st.cache_resource.clear()
+            st.rerun()
+        except Exception as err:
+            st.error(f"❌ Gagal menyimpan data: {err}")
+
+# --- 8. DASHBOARD METRICS & RINGKASAN ---
 st.divider()
-st.subheader("📊 Data Monitoring Surat Kapal")
+st.subheader("📊 Ringkasan Status Surat Kapal")
 
-if not df.empty:
-    c1, c2, c3 = st.columns(3)
-    exp_count = len(df[df['Status Surat'] == "🔴 EXPIRED"])
-    warn_count = len(df[df['Status Surat'].str.contains("Kritis|Perhatian", na=False)])
-    safe_count = len(df[df['Status Surat'] == "🟢 Aman"])
+if not filtered_df.empty:
+    m1, m2, m3, m4, m5 = st.columns(5)
     
-    c1.metric("🔴 Expired", f"{exp_count} Surat")
-    c2.metric("🟡 Mendekati Expired", f"{warn_count} Surat")
-    c3.metric("🟢 Aman", f"{safe_count} Surat")
+    cnt_expired = len(filtered_df[filtered_df['Status Surat'] == "🔴 EXPIRED"])
+    cnt_15 = len(filtered_df[filtered_df['Status Surat'] == "🚨 Sangat Kritis (<= 15 Hari)"])
+    cnt_30 = len(filtered_df[filtered_df['Status Surat'] == "🟡 Kritis (<= 30 Hari)"])
+    cnt_endorse = len(filtered_df[filtered_df['Status Surat'] == "🔵 Perlu Endorse (Masa Endorse <= 3 Bulan)"])
+    cnt_safe = len(filtered_df[filtered_df['Status Surat'] == "🟢 Aman (> 3 Bulan / Sesudah Endorse)"])
+    
+    m1.metric("🔴 Expired", f"{cnt_expired}")
+    m2.metric("🚨 <= 15 Hari", f"{cnt_15}")
+    m3.metric("🟡 <= 30 Hari", f"{cnt_30}")
+    m4.metric("🔵 Perlu Endorse", f"{cnt_endorse}")
+    m5.metric("🟢 Aman", f"{cnt_safe}")
 
-    display_df = df.drop(columns=['Exp_Date'], errors='ignore')
+    st.write("")
+    # Drop kolom bantu datetime sebelum ditampilkan di UI
+    display_df = filtered_df.drop(columns=['Exp_Date', 'Sisa_Hari_Num'], errors='ignore')
     st.dataframe(display_df, use_container_width=True)
 
-    # --- 8. FITUR SAVE TO PDF (KOMPATIBEL FPDF2) ---
+    # --- 9. EXPORT & SAVE TO PDF ---
     st.divider()
-    st.subheader("📄 Export Laporan ke PDF")
+    st.subheader("📄 Export Laporan PDF (Sesuai Filter)")
 
-    def generate_pdf(dataframe):
+    def generate_pdf(data_to_pdf):
         pdf = FPDF()
         pdf.add_page()
         pdf.set_font("Helvetica", 'B', 14)
-        pdf.cell(190, 10, text="Laporan Monitoring Surat Kapal", new_x="LMARGIN", new_y="NEXT", align='C')
-        pdf.set_font("Helvetica", '', 10)
-        pdf.cell(190, 8, text=f"Tanggal Cetak: {datetime.now().strftime('%Y-%m-%d %H:%M')}", new_x="LMARGIN", new_y="NEXT", align='C')
-        pdf.ln(5)
+        pdf.cell(190, 10, text="Laporan Monitoring Surat & Endorsement Kapal", new_x="LMARGIN", new_y="NEXT", align='C')
+        pdf.set_font("Helvetica", '', 9)
+        pdf.cell(190, 6, text=f"Tanggal Dicetak: {datetime.now().strftime('%d-%m-%Y %H:%M')}", new_x="LMARGIN", new_y="NEXT", align='C')
+        pdf.ln(4)
 
         # Header Tabel PDF
-        pdf.set_font("Helvetica", 'B', 9)
-        cols = [col_kapal, col_surat, "Sisa Hari", "Status Surat"]
-        w = [45, 65, 30, 50]
-        for i, col in enumerate(cols):
-            pdf.cell(w[i], 8, text=str(col), border=1, align='C')
+        pdf.set_font("Helvetica", 'B', 8)
+        w = [40, 55, 25, 70]
+        headers_pdf = [col_kapal, col_surat, "Sisa Hari", "Status Surat"]
+        for i, h in enumerate(headers_pdf):
+            pdf.cell(w[i], 7, text=str(h), border=1, align='C')
         pdf.ln()
 
         # Isi Tabel PDF
-        pdf.set_font("Helvetica", '', 8)
-        for _, row in dataframe.iterrows():
-            pdf.cell(w[0], 7, text=str(row.get(col_kapal, ''))[:22], border=1)
-            pdf.cell(w[1], 7, text=str(row.get(col_surat, ''))[:35], border=1)
-            pdf.cell(w[2], 7, text=str(row.get("Sisa Hari", '-')), border=1, align='C')
+        pdf.set_font("Helvetica", '', 7)
+        for _, row in data_to_pdf.iterrows():
+            pdf.cell(w[0], 6, text=str(row.get(col_kapal, ''))[:20], border=1)
+            pdf.cell(w[1], 6, text=str(row.get(col_surat, ''))[:30], border=1)
+            pdf.cell(w[2], 6, text=str(row.get("Sisa Hari", '-')), border=1, align='C')
             
-            # Bersihkan emoji agar fpdf2 standar font Helvetica tidak error
+            # Bersihkan emoji dari status agar PDF tidak corrupt/error
             status_clean = str(row.get("Status Surat", '-')).encode('ascii', 'ignore').decode('ascii').strip()
-            pdf.cell(w[3], 7, text=status_clean, border=1, align='C')
+            pdf.cell(w[3], 6, text=status_clean, border=1)
             pdf.ln()
 
         return bytes(pdf.output())
 
-    pdf_data = generate_pdf(df)
+    pdf_bytes = generate_pdf(filtered_df)
     st.download_button(
         label="📥 Download Laporan (Save to PDF)",
-        data=pdf_data,
-        file_name=f"Laporan_Monitoring_Kapal_{datetime.now().strftime('%Y%m%d')}.pdf",
+        data=pdf_bytes,
+        file_name=f"Laporan_Surat_Kapal_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
         mime="application/pdf"
     )
 else:
-    st.info("Belum ada data yang tersimpan di spreadsheet.")
+    st.info("Tidak ada data yang sesuai dengan filter yang dipilih.")
