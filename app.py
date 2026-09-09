@@ -42,7 +42,6 @@ def load_and_transform_matrix_data(raw_data):
     if not raw_data or len(raw_data) < 3:
         return pd.DataFrame(), [], []
     
-    # Baris 2 (indeks 1) = Header Kapal (Kolom B, C, D, dst.)
     header_row = raw_data[1] 
     kapal_list = [str(h).strip() for h in header_row[1:] if str(h).strip() != ""]
     
@@ -91,8 +90,13 @@ def load_and_transform_matrix_data(raw_data):
                         status_str = "AMAN"
                         cat_status = "AMAN"
                         
-                    # Window Endorse (±3 Bln)
-                    if "ENDORSE" in jenis_surat.upper():
+                    # Window Endorse
+                    jenis_upper = jenis_surat.upper()
+                    if "SIUPAL" in jenis_upper and "ENDORSE" in jenis_upper:
+                        # Khusus SIUPAL ENDORSE
+                        window_endorse = exp_dt.strftime('%d %b %Y')
+                    elif "ENDORSE" in jenis_upper:
+                        # Endorse selain SIUPAL (±3 bulan / 90 hari)
                         start_w = exp_dt - timedelta(days=90)
                         end_w = exp_dt + timedelta(days=90)
                         window_endorse = f"{start_w.strftime('%d %b %Y')} s/d {end_w.strftime('%d %b %Y')}"
