@@ -238,8 +238,8 @@ if not filtered_df.empty:
     st.divider()
     
     def generate_pdf(dataframe):
-        # 💡 Urutkan data berdasarkan Nama Kapal (A-Z), lalu Jenis Surat (A-Z) agar rapi di PDF
-        pdf_df = dataframe.sort_values(by=["Nama Kapal", "Jenis Surat"], ascending=[True, True])
+        # 💡 Urutkan per NAMA KAPAL (A-Z), lalu di dalam kapal tersebut diurutkan dari SISA HARI TERKECIL (Expired paling atas)
+        pdf_df = dataframe.sort_values(by=["Nama Kapal", "Sisa_Hari_Num"], ascending=[True, True])
 
         pdf = FPDF(orientation='L', unit='mm', format='A4')
         pdf.add_page()
