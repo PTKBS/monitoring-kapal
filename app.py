@@ -240,34 +240,55 @@ if not filtered_df.empty:
     def generate_pdf(dataframe):
         pdf = FPDF(orientation='L', unit='mm', format='A4')
         pdf.add_page()
+        
+        # Judul
         pdf.set_font("Helvetica", 'B', 12)
         pdf.cell(277, 8, text="Laporan Monitoring Surat & Endorsement Kapal", new_x="LMARGIN", new_y="NEXT", align='C')
         pdf.set_font("Helvetica", '', 9)
         pdf.cell(277, 5, text=f"Tanggal Cetak: {datetime.now().strftime('%d-%b-%Y')}", new_x="LMARGIN", new_y="NEXT", align='C')
         pdf.ln(4)
 
+        # Header Tabel
         pdf.set_font("Helvetica", 'B', 8)
+        pdf.set_fill_color(230, 230, 230) # Warna latar header (abu-abu muda)
         w = [45, 65, 30, 25, 45, 67]
         headers = ["Nama Kapal", "Jenis Surat", "Tgl Expired", "Sisa Hari", "Status", "Window Endorse (±3 Bln)"]
+        
         for i, h in enumerate(headers):
-            pdf.cell(w[i], 7, text=h, border=1, align='C')
+            pdf.cell(w[i], 7, text=h, border=1, align='C', fill=True)
         pdf.ln()
 
+        # Isi Tabel Berwarna
         pdf.set_font("Helvetica", '', 7)
         for _, row in dataframe.iterrows():
-            pdf.cell(w[0], 6, text=str(row['Nama Kapal'])[:25], border=1)
-            pdf.cell(w[1], 6, text=str(row['Jenis Surat'])[:40], border=1)
-            pdf.cell(w[2], 6, text=str(row['Tgl Expired']), border=1, align='C')
-            pdf.cell(w[3], 6, text=str(row['Sisa Hari']), border=1, align='C')
-            pdf.cell(w[4], 6, text=str(row['Status'])[:28], border=1)
-            pdf.cell(w[5], 6, text=str(row['Window Endorse (±3 Bln)']), border=1, align='C')
+            cat = row['Cat_Status']
+            
+            # Tentukan warna latar berdasarkan Cat_Status (RGB)
+            if cat == 'EXPIRED':
+                pdf.set_fill_color(255, 204, 204) # Merah Muda
+                fill = True
+            elif cat == 'DESAK':
+                pdf.set_fill_color(255, 230, 204) # Oranye Muda
+                fill = True
+            elif cat == 'KRITIS':
+                pdf.set_fill_color(255, 255, 204) # Kuning Muda
+                fill = True
+            else:
+                fill = False # Warna putih biasa jika AMAN
+
+            pdf.cell(w[0], 6, text=str(row['Nama Kapal'])[:25], border=1, fill=fill)
+            pdf.cell(w[1], 6, text=str(row['Jenis Surat'])[:40], border=1, fill=fill)
+            pdf.cell(w[2], 6, text=str(row['Tgl Expired']), border=1, align='C', fill=fill)
+            pdf.cell(w[3], 6, text=str(row['Sisa Hari']), border=1, align='C', fill=fill)
+            pdf.cell(w[4], 6, text=str(row['Status'])[:28], border=1, fill=fill)
+            pdf.cell(w[5], 6, text=str(row['Window Endorse (±3 Bln)']), border=1, align='C', fill=fill)
             pdf.ln()
 
         return bytes(pdf.output())
 
     pdf_bytes = generate_pdf(filtered_df)
     st.download_button(
-        label="📥 Download PDF Laporan",
+        label="📥 Download PDF Laporan Berwarna",
         data=pdf_bytes,
         file_name=f"Laporan_Surat_Kapal_{datetime.now().strftime('%Y%m%d')}.pdf",
         mime="application/pdf"
