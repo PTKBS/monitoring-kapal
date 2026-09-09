@@ -23,7 +23,7 @@ def get_worksheet():
     gc = gspread.service_account_from_dict(credentials)
     
     # 💡 PASTE SPREADSHEET ID KAMU DI SINI (dari URL browser)
-    SPREADSHEET_ID = "1ovR8ZxhQmLYv73iSu1xWEXsG1ipL448fmIhs4zJ8P6o"
+    SPREADSHEET_ID = "PASTE_ID_SPREADSHEET_KAMU_DI_SINI"
     
     sh = gc.open_by_key(SPREADSHEET_ID)
     return sh.sheet1
@@ -34,14 +34,23 @@ except Exception as e:
     st.error(f"⚠️ Gagal terhubung ke Google Sheets: {e}")
     st.stop()
 
-# --- 3. FUNGSI BACA DATA (HEADER DI BARIS 2, DATA BARIS 3+) ---
+# --- 3. FUNGSI BACA DATA (HEADER DI BARIS 2 ATAU BARIS 1) ---
 def load_data():
     raw_data = worksheet.get_all_values()
-    if len(raw_data) < 2:
+    if not raw_data:
         return pd.DataFrame()
     
-    headers = [h.strip() for h in raw_data[1]]
-    data_rows = raw_data[2:] if len(raw_data) > 2 else []
+    # Jika baris 1 kosong atau berupa judul, gunakan baris 2 sebagai header
+    if len(raw_data) >= 2 and any("kapal" in str(cell).lower() for cell in raw_data[1]):
+        headers = [str(h).strip() for h in raw_data[1]]
+        data_rows = raw_data[2:] if len(raw_data) > 2 else []
+    else:
+        # Fallback: gunakan baris 1 sebagai header jika baris 2 bukan header kapal
+        headers = [str(h).strip() for h in raw_data[0]]
+        data_rows = raw_data[1:] if len(raw_data) > 1 else []
+    
+    # Buat header unik jika ada kolom kosong
+    headers = [h if h != "" else f"Kolom_{i+1}" for i, h in enumerate(headers)]
     
     df = pd.DataFrame(data_rows, columns=headers)
     return df
@@ -49,16 +58,27 @@ def load_data():
 df = load_data()
 
 # --- 4. PERHITUNGAN STATUS EXPIRED & SISA HARI ---
+# Inisialisasi kolom default agar tidak terjadi KeyError
+df['Status Surat'] = "⚪ Tanpa Tanggal"
+df['Sisa Hari'] = "-"
+
 if not df.empty:
     col_kapal = next((c for c in df.columns if "kapal" in c.lower()), df.columns[0])
-    col_surat = next((c for c in df.columns if "surat" in c.lower()), df.columns[1])
-    col_exp = next((c for c in df.columns if "exp" in c.lower() or "kadaluarsa" in c.lower() or "berlaku" in c.lower()), None)
+    col_surat = next((c for c in df.columns if "surat" in c.lower()), df.columns[1] if len(df.columns) > 1 else df.columns[0])
     
-    if col_exp:
+    # Cari nama kolom yang mengandung kata kunci expired/kadaluarsa/berlaku/tgl
+    col_exp = next((c for c in df.columns if any(k in c.lower() for k in ["exp", "kadaluarsa", "berlaku", "tanggal", "tgl"])), None)
+    
+    # Fallback jika kolom tidak ketemu lewat kata kunci
+    if not col_exp and len(df.columns) >= 4:
+        col_exp = df.columns[3]
+    
+    if col_exp and col_exp in df.columns:
         df['Exp_Date'] = pd.to_datetime(df[col_exp], errors='coerce')
         today = datetime.now()
         
-        df['Sisa Hari'] = (df['Exp_Date'] - today).dt.days
+        # Hitung sisa hari
+        sisa_hari_numeric = (df['Exp_Date'] - today).dt.days
         
         def check_status(days):
             if pd.isna(days):
@@ -72,10 +92,14 @@ if not df.empty:
             else:
                 return "🟢 Aman"
                 
-        df['Status Surat'] = df['Sisa Hari'].apply(check_status)
+        df['Status Surat'] = sisa_hari_numeric.apply(check_status)
+        df['Sisa Hari'] = sisa_hari_numeric.apply(lambda x: f"{int(x)} Hari" if pd.notna(x) else "-")
+else:
+    col_kapal = "Nama Kapal"
+    col_surat = "Nama Surat"
 
-# --- 5. EKSTRAKSI DROPDOWN ---
-if not df.empty:
+# --- 5. EKSTRAKSI DROPDOWN NAMA KAPAL & SURAT ---
+if not df.empty and col_kapal in df.columns and col_surat in df.columns:
     list_kapal = [k for k in df[col_kapal].dropna().unique().tolist() if str(k).strip() != ""]
     list_surat = [s for s in df[col_surat].dropna().unique().tolist() if str(s).strip() != ""]
 else:
@@ -114,7 +138,7 @@ if submit_button:
     except Exception as err:
         st.error(f"❌ Gagal menyimpan data: {err}")
 
-# --- 7. TAMPILAN MONITORING & FILTER ---
+# --- 7. TAMPILAN MONITORING & RINGKASAN STATUS ---
 st.divider()
 st.subheader("📊 Data Monitoring Surat Kapal")
 
@@ -144,7 +168,7 @@ if not df.empty:
         pdf.cell(190, 8, text=f"Tanggal Cetak: {datetime.now().strftime('%Y-%m-%d %H:%M')}", new_x="LMARGIN", new_y="NEXT", align='C')
         pdf.ln(5)
 
-        # Header Tabel
+        # Header Tabel PDF
         pdf.set_font("Helvetica", 'B', 9)
         cols = [col_kapal, col_surat, "Sisa Hari", "Status Surat"]
         w = [45, 65, 30, 50]
@@ -152,19 +176,18 @@ if not df.empty:
             pdf.cell(w[i], 8, text=str(col), border=1, align='C')
         pdf.ln()
 
-        # Isi Tabel
+        # Isi Tabel PDF
         pdf.set_font("Helvetica", '', 8)
         for _, row in dataframe.iterrows():
             pdf.cell(w[0], 7, text=str(row.get(col_kapal, ''))[:22], border=1)
             pdf.cell(w[1], 7, text=str(row.get(col_surat, ''))[:35], border=1)
             pdf.cell(w[2], 7, text=str(row.get("Sisa Hari", '-')), border=1, align='C')
             
-            # Bersihkan emoji agar fpdf2 standar font tidak error
+            # Bersihkan emoji agar fpdf2 standar font Helvetica tidak error
             status_clean = str(row.get("Status Surat", '-')).encode('ascii', 'ignore').decode('ascii').strip()
             pdf.cell(w[3], 7, text=status_clean, border=1, align='C')
             pdf.ln()
 
-        # Output sebagai bytes menggunakan output() standar fpdf2
         return bytes(pdf.output())
 
     pdf_data = generate_pdf(df)
