@@ -19,12 +19,23 @@ def get_gspread_client():
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
     ]
-    # Mengambil kredensial dari Streamlit Secrets [gcp_service_account]
     credentials = Credentials.from_service_account_info(
         st.secrets["gcp_service_account"],
         scopes=scopes
     )
     return gspread.authorize(credentials)
+
+try:
+    gc = get_gspread_client()
+    
+    # 💡 Ganti string di bawah dengan SPREADSHEET ID dari URL Google Sheets kamu
+    SPREADSHEET_ID = "1ovR8ZxhQmLYv73iSu1xWEXsG1ipL448fmIhs4zJ8P6o"
+    
+    sh = gc.open_by_key(SPREADSHEET_ID) 
+    worksheet = sh.sheet1
+except Exception as e:
+    st.error(f"⚠️ Gagal terhubung ke Google Sheets: {e}")
+    st.stop()
 
 try:
     gc = get_gspread_client()
