@@ -24,7 +24,7 @@ def get_worksheet():
     gc = gspread.service_account_from_dict(credentials)
     
     # MASUKKAN SPREADSHEET ID KAMU DI SINI (diambil dari URL browser antara /d/ dan /edit)
-    SPREADSHEET_ID = "PASTE_ID_SPREADSHEET_KAMU_DI_SINI"
+    SPREADSHEET_ID = "1ovR8ZxhQmLYv73iSu1xWEXsG1ipL448fmIhs4zJ8P6o"
     
     sh = gc.open_by_key(SPREADSHEET_ID)
     return sh.sheet1
