@@ -11,7 +11,7 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("🚢 Laporan Monitoring Surat & Endorsement Kapal")
+st.title("🚢 Dashboard & Laporan Monitoring Surat Kapal")
 
 # --- 2. KONEKSI GOOGLE SHEETS ---
 @st.cache_resource
@@ -34,20 +34,22 @@ except Exception as e:
     st.error(f"⚠️ Gagal terhubung ke Google Sheets: {e}")
     st.stop()
 
-# --- 3. PEMBACAAN DAN TRANSFORMASI DATA MATRIKS ---
-def load_and_transform_matrix_data():
-    raw_data = worksheet.get_all_values()
+# --- 3. BACA & TRANSFORMASI DATA MATRIKS ---
+def load_raw_matrix():
+    """Mengambil raw data dari Google Sheets"""
+    return worksheet.get_all_values()
+
+def load_and_transform_matrix_data(raw_data):
     if not raw_data or len(raw_data) < 3:
-        return pd.DataFrame()
+        return pd.DataFrame(), [], []
     
-    # Baris 2 (indeks 1) berisi Nama-nama Kapal (Kolom B, C, D, dst.)
+    # Baris 2 (indeks 1) = Header Kapal (Kolom B, C, D, dst.)
     header_row = raw_data[1] 
+    kapal_list = [str(h).strip() for h in header_row[1:] if str(h).strip() != ""]
     
-    # Ambil daftar kapal mulai dari Kolom B (indeks 1 ke atas)
-    kapal_list = [str(h).strip() for h in header_row[1:]]
-    
-    # Data surat dimulai dari Baris 3 (indeks 2 ke bawah)
+    # Baris 3 ke bawah = Jenis Surat
     rows_data = raw_data[2:]
+    surat_list = []
     
     transformed_records = []
     today = datetime.now()
@@ -57,41 +59,42 @@ def load_and_transform_matrix_data():
             continue
             
         jenis_surat = str(r[0]).strip()
-        if not jenis_surat: # Abaikan baris kosong
+        if not jenis_surat:
             continue
             
-        # Periksa tiap kolom kapal untuk jenis surat ini
-        for col_idx, kapal_name in enumerate(kapal_list, start=1):
-            if not kapal_name: # Jika nama kapal di header kosong, lewati
+        surat_list.append(jenis_surat)
+            
+        # Iterasi per kapal
+        for col_idx, kapal_name in enumerate(header_row[1:], start=1):
+            kapal_name = str(kapal_name).strip()
+            if not kapal_name:
                 continue
                 
             tgl_str = str(r[col_idx]).strip() if col_idx < len(r) else ""
             
-            # Jika ada tanggal expired di sel tersebut
             if tgl_str != "":
-                # Coba parse berbagai format tanggal (e.g. 4-3-2027, 04/03/2027, 2027-03-04)
                 exp_dt = pd.to_datetime(tgl_str, errors='coerce', dayfirst=True)
                 
                 if pd.notna(exp_dt):
                     sisa_hari_num = (exp_dt - today).days
-                    
-                    # Format Tanggal Expired
                     tgl_exp_fmt = exp_dt.strftime("%d-%b-%Y")
-                    
-                    # Format Sisa Hari
                     sisa_hari_fmt = f"{sisa_hari_num} h"
                     
-                    # Format Status
+                    # Penentuan Status
                     if sisa_hari_num < 0:
                         status_str = "EXPIRED"
+                        cat_status = "EXPIRED"
                     elif sisa_hari_num <= 14:
                         status_str = f"SANGAT DESAK (<={sisa_hari_num} Hari)"
+                        cat_status = "DESAK"
                     elif sisa_hari_num <= 30:
                         status_str = "KRITIS (<=30 Hari)"
+                        cat_status = "KRITIS"
                     else:
                         status_str = "AMAN"
+                        cat_status = "AMAN"
                         
-                    # Format Window Endorse (±3 Bln) khusus surat dengan kata ENDORSE
+                    # Window Endorse (±3 Bln)
                     if "ENDORSE" in jenis_surat.upper():
                         start_w = exp_dt - timedelta(days=90)
                         end_w = exp_dt + timedelta(days=90)
@@ -106,53 +109,126 @@ def load_and_transform_matrix_data():
                         "Sisa Hari": sisa_hari_fmt,
                         "Status": status_str,
                         "Window Endorse (±3 Bln)": window_endorse,
-                        "Sisa_Hari_Num": sisa_hari_num # Untuk sorting
+                        "Cat_Status": cat_status,
+                        "Sisa_Hari_Num": sisa_hari_num
                     })
 
     df_result = pd.DataFrame(transformed_records)
     
-    # Sort berdasarkan sisa hari (yang paling mendesak/expired paling atas)
     if not df_result.empty:
         df_result = df_result.sort_values(by="Sisa_Hari_Num", ascending=True)
-        df_result = df_result.drop(columns=["Sisa_Hari_Num"])
         
-    return df_result
+    return df_result, sorted(list(set(kapal_list))), sorted(list(set(surat_list)))
 
-df_table = load_and_transform_matrix_data()
+raw_data = load_raw_matrix()
+df_table, list_kapal_all, list_surat_all = load_and_transform_matrix_data(raw_data)
 
-# --- 4. TAMPILAN KEPALA LAPORAN ---
-st.caption(f"Tanggal Cetak: {datetime.now().strftime('%d-%b-%Y')}")
-
-# --- 5. SIDEBAR FILTER ---
-st.sidebar.header("🔍 Filter Data")
+# --- 4. RINGKASAN METRIK / BADGE RINGKASAN (KPI CARDS) ---
 if not df_table.empty:
-    list_kapal = sorted([k for k in df_table['Nama Kapal'].unique().tolist() if k])
-    list_surat = sorted([s for s in df_table['Jenis Surat'].unique().tolist() if s])
-    
-    selected_kapal = st.sidebar.multiselect("Nama Kapal", options=list_kapal, default=list_kapal)
-    selected_surat = st.sidebar.multiselect("Jenis Surat", options=list_surat, default=list_surat)
+    cnt_expired = len(df_table[df_table['Cat_Status'] == "EXPIRED"])
+    cnt_desak = len(df_table[df_table['Cat_Status'] == "DESAK"])
+    cnt_kritis = len(df_table[df_table['Cat_Status'] == "KRITIS"])
+    cnt_aman = len(df_table[df_table['Cat_Status'] == "AMAN"])
+
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric(label="🔴 EXPIRED", value=f"{cnt_expired} Surat")
+    with col2:
+        st.metric(label="🟠 SANGAT DESAK (≤14 Hr)", value=f"{cnt_desak} Surat")
+    with col3:
+        st.metric(label="🟡 KRITIS (≤30 Hr)", value=f"{cnt_kritis} Surat")
+    with col4:
+        st.metric(label="🟢 AMAN (>30 Hr)", value=f"{cnt_aman} Surat")
+
+    st.divider()
+
+# --- 5. SIDEBAR: FILTER & FORM INPUT/UPDATE TANGGAL ---
+st.sidebar.header("🔍 Filter Data")
+filtered_df = df_table.copy()
+
+if not df_table.empty:
+    selected_kapal = st.sidebar.multiselect("Filter Kapal", options=list_kapal_all, default=list_kapal_all)
+    selected_surat = st.sidebar.multiselect("Filter Jenis Surat", options=list_surat_all, default=list_surat_all)
     
     if selected_kapal:
-        df_table = df_table[df_table['Nama Kapal'].isin(selected_kapal)]
+        filtered_df = filtered_df[filtered_df['Nama Kapal'].isin(selected_kapal)]
     if selected_surat:
-        df_table = df_table[df_table['Jenis Surat'].isin(selected_surat)]
+        filtered_df = filtered_df[filtered_df['Jenis Surat'].isin(selected_surat)]
 
-# --- 6. TABEL UTAMA ---
-if not df_table.empty:
-    st.dataframe(
-        df_table,
-        use_container_width=True,
-        hide_index=True
-    )
+# FORM UPDATE TANGGAL DI SIDEBAR
+st.sidebar.divider()
+st.sidebar.header("📝 Update Tanggal Surat")
+with st.sidebar.form("form_update_tanggal", clear_on_submit=True):
+    input_kapal = st.selectbox("Pilih Kapal", options=["-- Pilih Kapal --"] + list_kapal_all)
+    input_surat = st.selectbox("Pilih Jenis Surat", options=["-- Pilih Surat --"] + list_surat_all)
+    input_tgl = st.date_input("Tanggal Expired Baru", value=datetime.now())
+    btn_submit = st.form_submit_button("💾 Simpan Tanggal Ke Google Sheets")
+
+if btn_submit:
+    if input_kapal == "-- Pilih Kapal --" or input_surat == "-- Pilih Surat --":
+        st.sidebar.error("⚠️ Silakan pilih Kapal dan Jenis Surat yang valid!")
+    else:
+        try:
+            # Cari posisi Baris (Jenis Surat) & Kolom (Nama Kapal) di Sheet
+            header_row = raw_data[1]
+            
+            # Kolom Kapal (1-indexed di gspread)
+            col_target = None
+            for idx, k in enumerate(header_row):
+                if str(k).strip() == input_kapal:
+                    col_target = idx + 1 # gspread menggunakan indeks basis 1
+                    break
+            
+            # Baris Surat (1-indexed di gspread)
+            row_target = None
+            for idx, r in enumerate(raw_data):
+                if len(r) > 0 and str(r[0]).strip() == input_surat:
+                    row_target = idx + 1
+                    break
+            
+            if row_target and col_target:
+                # Format tanggal DD-MM-YYYY untuk Google Sheets
+                tgl_formatted = input_tgl.strftime("%d-%m-%Y")
+                worksheet.update_cell(row_target, col_target, tgl_formatted)
+                st.sidebar.success(f"✅ Tanggal {input_surat} ({input_kapal}) berhasil diupdate ke {tgl_formatted}!")
+                st.cache_resource.clear()
+                st.rerun()
+            else:
+                st.sidebar.error("❌ Nama Kapal atau Surat tidak ditemukan pada tabel Google Sheets!")
+        except Exception as e:
+            st.sidebar.error(f"⚠️ Gagal memperbarui Google Sheets: {e}")
+
+# --- 6. TAMPILAN TABEL + HIGHLIGHT WARNA ---
+st.subheader("📋 Daftar Status Surat Kapal")
+
+if not filtered_df.empty:
+    # Buat copy data untuk ditampilkan ke tabel
+    show_df = filtered_df[["Nama Kapal", "Jenis Surat", "Tgl Expired", "Sisa Hari", "Status", "Window Endorse (±3 Bln)", "Cat_Status"]].copy()
+
+    # Fungsi penanda warna per baris
+    def highlight_rows(row):
+        cat = row['Cat_Status']
+        if cat == 'EXPIRED':
+            return ['background-color: #ffcccc; color: #8b0000; font-weight: bold;'] * len(row) # Red
+        elif cat == 'DESAK':
+            return ['background-color: #ffe6cc; color: #b35900; font-weight: bold;'] * len(row) # Orange
+        elif cat == 'KRITIS':
+            return ['background-color: #ffffcc; color: #808000;'] * len(row) # Yellow
+        else:
+            return [''] * len(row)
+
+    # Tampilkan dataframe ber-styling
+    styled_df = show_df.drop(columns=['Cat_Status']).style.apply(highlight_rows, axis=1)
+    st.dataframe(styled_df, use_container_width=True, hide_index=True)
 else:
-    st.warning("⚠️ Tidak ada data ditemukan. Pastikan Google Sheets terisi dengan format tanggal yang benar.")
+    st.warning("⚠️ Tidak ada data ditemukan.")
 
 # --- 7. EXPORT TO PDF ---
-if not df_table.empty:
+if not filtered_df.empty:
     st.divider()
     
     def generate_pdf(dataframe):
-        pdf = FPDF(orientation='L', unit='mm', format='A4') # Landscape A4
+        pdf = FPDF(orientation='L', unit='mm', format='A4')
         pdf.add_page()
         pdf.set_font("Helvetica", 'B', 12)
         pdf.cell(277, 8, text="Laporan Monitoring Surat & Endorsement Kapal", new_x="LMARGIN", new_y="NEXT", align='C')
@@ -181,7 +257,7 @@ if not df_table.empty:
 
         return bytes(pdf.output())
 
-    pdf_bytes = generate_pdf(df_table)
+    pdf_bytes = generate_pdf(filtered_df)
     st.download_button(
         label="📥 Download PDF Laporan",
         data=pdf_bytes,
