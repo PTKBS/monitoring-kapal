@@ -34,99 +34,100 @@ except Exception as e:
     st.error(f"⚠️ Gagal terhubung ke Google Sheets: {e}")
     st.stop()
 
-# --- 3. PEMBACAAN DAN OLAH DATA ---
-def load_and_process_data():
+# --- 3. PEMBACAAN DAN TRANSFORMASI DATA MATRIKS ---
+def load_and_transform_matrix_data():
     raw_data = worksheet.get_all_values()
-    if not raw_data:
+    if not raw_data or len(raw_data) < 3:
         return pd.DataFrame()
     
-    # Ambil baris header & data
-    if len(raw_data) >= 2 and any(raw_data[1]):
-        headers = [str(h).strip() for h in raw_data[1]]
-        data_rows = raw_data[2:] if len(raw_data) > 2 else []
-    else:
-        headers = [str(h).strip() for h in raw_data[0]]
-        data_rows = raw_data[1:] if len(raw_data) > 1 else []
-        
-    df = pd.DataFrame(data_rows)
-    if df.empty:
-        return pd.DataFrame()
-        
-    df = df.iloc[:, :len(headers)]
-    df.columns = [h if h != "" else f"Kolom_{i+1}" for i, h in enumerate(headers)]
-
-    # Otomatisasi Pencarian Kolom
-    col_kapal = next((c for c in df.columns if "kapal" in c.lower()), df.columns[0])
-    col_surat = next((c for c in df.columns if "surat" in c.lower()), df.columns[1] if len(df.columns) > 1 else df.columns[0])
-    col_exp = next((c for c in df.columns if any(k in c.lower() for k in ["exp", "kadaluarsa", "berlaku"])), None)
-
+    # Baris 2 (indeks 1) berisi Nama-nama Kapal (Kolom B, C, D, dst.)
+    header_row = raw_data[1] 
+    
+    # Ambil daftar kapal mulai dari Kolom B (indeks 1 ke atas)
+    kapal_list = [str(h).strip() for h in header_row[1:]]
+    
+    # Data surat dimulai dari Baris 3 (indeks 2 ke bawah)
+    rows_data = raw_data[2:]
+    
+    transformed_records = []
     today = datetime.now()
+
+    for r in rows_data:
+        if not r or len(r) == 0:
+            continue
+            
+        jenis_surat = str(r[0]).strip()
+        if not jenis_surat: # Abaikan baris kosong
+            continue
+            
+        # Periksa tiap kolom kapal untuk jenis surat ini
+        for col_idx, kapal_name in enumerate(kapal_list, start=1):
+            if not kapal_name: # Jika nama kapal di header kosong, lewati
+                continue
+                
+            tgl_str = str(r[col_idx]).strip() if col_idx < len(r) else ""
+            
+            # Jika ada tanggal expired di sel tersebut
+            if tgl_str != "":
+                # Coba parse berbagai format tanggal (e.g. 4-3-2027, 04/03/2027, 2027-03-04)
+                exp_dt = pd.to_datetime(tgl_str, errors='coerce', dayfirst=True)
+                
+                if pd.notna(exp_dt):
+                    sisa_hari_num = (exp_dt - today).days
+                    
+                    # Format Tanggal Expired
+                    tgl_exp_fmt = exp_dt.strftime("%d-%b-%Y")
+                    
+                    # Format Sisa Hari
+                    sisa_hari_fmt = f"{sisa_hari_num} h"
+                    
+                    # Format Status
+                    if sisa_hari_num < 0:
+                        status_str = "EXPIRED"
+                    elif sisa_hari_num <= 14:
+                        status_str = f"SANGAT DESAK (<={sisa_hari_num} Hari)"
+                    elif sisa_hari_num <= 30:
+                        status_str = "KRITIS (<=30 Hari)"
+                    else:
+                        status_str = "AMAN"
+                        
+                    # Format Window Endorse (±3 Bln) khusus surat dengan kata ENDORSE
+                    if "ENDORSE" in jenis_surat.upper():
+                        start_w = exp_dt - timedelta(days=90)
+                        end_w = exp_dt + timedelta(days=90)
+                        window_endorse = f"{start_w.strftime('%d %b %Y')} s/d {end_w.strftime('%d %b %Y')}"
+                    else:
+                        window_endorse = "-"
+                        
+                    transformed_records.append({
+                        "Nama Kapal": kapal_name,
+                        "Jenis Surat": jenis_surat,
+                        "Tgl Expired": tgl_exp_fmt,
+                        "Sisa Hari": sisa_hari_fmt,
+                        "Status": status_str,
+                        "Window Endorse (±3 Bln)": window_endorse,
+                        "Sisa_Hari_Num": sisa_hari_num # Untuk sorting
+                    })
+
+    df_result = pd.DataFrame(transformed_records)
     
-    # Parse Tanggal Expired
-    if col_exp and col_exp in df.columns:
-        df['Exp_Dt'] = pd.to_datetime(df[col_exp], errors='coerce', dayfirst=True)
-    else:
-        df['Exp_Dt'] = pd.NaT
-
-    # Perhitungan Sisa Hari
-    df['Sisa_Hari_Num'] = (df['Exp_Dt'] - today).dt.days
-
-    # 1. Format Tgl Expired (DD-Mon-YYYY)
-    df['Tgl Expired'] = df['Exp_Dt'].apply(lambda d: d.strftime("%d-%b-%Y") if pd.notna(d) else "-")
-
-    # 2. Format Sisa Hari ("14 h")
-    df['Sisa Hari'] = df['Sisa_Hari_Num'].apply(lambda x: f"{int(x)} h" if pd.notna(x) else "-")
-
-    # 3. Format Status Exact
-    def get_status_text(days):
-        if pd.isna(days):
-            return "TANPA TANGGAL"
-        elif days < 0:
-            return "EXPIRED"
-        elif days <= 14:
-            return f"SANGAT DESAK (<={int(days)} Hari)"
-        elif days <= 30:
-            return "KRITIS (<=30 Hari)"
-        else:
-            return "AMAN"
-
-    df['Status'] = df['Sisa_Hari_Num'].apply(get_status_text)
-
-    # 4. Format Window Endorse (±3 Bln) -> Rentang 3 Bulan Sebelum s/d 3 Bulan Sesudah
-    def get_window_endorse(row):
-        surat_name = str(row.get(col_surat, "")).upper()
-        exp_dt = row.get('Exp_Dt')
+    # Sort berdasarkan sisa hari (yang paling mendesak/expired paling atas)
+    if not df_result.empty:
+        df_result = df_result.sort_values(by="Sisa_Hari_Num", ascending=True)
+        df_result = df_result.drop(columns=["Sisa_Hari_Num"])
         
-        # Hanya dihitung jika ada kata ENDORSE pada jenis surat / tanggal valid
-        if "ENDORSE" in surat_name and pd.notna(exp_dt):
-            start_window = exp_dt - timedelta(days=90)
-            end_window = exp_dt + timedelta(days=90)
-            return f"{start_window.strftime('%d %b %Y')} s/d {end_window.strftime('%d %b %Y')}"
-        return "-"
+    return df_result
 
-    df['Window Endorse (±3 Bln)'] = df.apply(get_window_endorse, axis=1)
+df_table = load_and_transform_matrix_data()
 
-    # Susun DataFrame Persis Sesuai Kolom Gambar
-    final_df = pd.DataFrame()
-    final_df['Nama Kapal'] = df[col_kapal]
-    final_df['Jenis Surat'] = df[col_surat]
-    final_df['Tgl Expired'] = df['Tgl Expired']
-    final_df['Sisa Hari'] = df['Sisa Hari']
-    final_df['Status'] = df['Status']
-    final_df['Window Endorse (±3 Bln)'] = df['Window Endorse (±3 Bln)']
-    
-    return final_df
-
-df_table = load_and_process_data()
-
-# --- 4. TAMPILAN TANGGAL CETAK ---
+# --- 4. TAMPILAN KEPALA LAPORAN ---
 st.caption(f"Tanggal Cetak: {datetime.now().strftime('%d-%b-%Y')}")
 
 # --- 5. SIDEBAR FILTER ---
 st.sidebar.header("🔍 Filter Data")
 if not df_table.empty:
-    list_kapal = sorted([k for k in df_table['Nama Kapal'].dropna().unique().tolist() if str(k).strip() != ""])
-    list_surat = sorted([s for s in df_table['Jenis Surat'].dropna().unique().tolist() if str(s).strip() != ""])
+    list_kapal = sorted([k for k in df_table['Nama Kapal'].unique().tolist() if k])
+    list_surat = sorted([s for s in df_table['Jenis Surat'].unique().tolist() if s])
     
     selected_kapal = st.sidebar.multiselect("Nama Kapal", options=list_kapal, default=list_kapal)
     selected_surat = st.sidebar.multiselect("Jenis Surat", options=list_surat, default=list_surat)
@@ -136,7 +137,7 @@ if not df_table.empty:
     if selected_surat:
         df_table = df_table[df_table['Jenis Surat'].isin(selected_surat)]
 
-# --- 6. TABEL MONITORING UTAMA ---
+# --- 6. TABEL UTAMA ---
 if not df_table.empty:
     st.dataframe(
         df_table,
@@ -144,7 +145,7 @@ if not df_table.empty:
         hide_index=True
     )
 else:
-    st.info("Data tidak ditemukan atau belum ada isi.")
+    st.warning("⚠️ Tidak ada data ditemukan. Pastikan Google Sheets terisi dengan format tanggal yang benar.")
 
 # --- 7. EXPORT TO PDF ---
 if not df_table.empty:
@@ -159,7 +160,7 @@ if not df_table.empty:
         pdf.cell(277, 5, text=f"Tanggal Cetak: {datetime.now().strftime('%d-%b-%Y')}", new_x="LMARGIN", new_y="NEXT", align='C')
         pdf.ln(4)
 
-        # Header PDF
+        # Header Tabel PDF
         pdf.set_font("Helvetica", 'B', 8)
         w = [45, 65, 30, 25, 45, 67]
         headers = ["Nama Kapal", "Jenis Surat", "Tgl Expired", "Sisa Hari", "Status", "Window Endorse (±3 Bln)"]
