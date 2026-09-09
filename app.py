@@ -142,26 +142,20 @@ if not df_table.empty:
 
     st.divider()
 
-# --- 5. SIDEBAR: FILTER & FORM INPUT/UPDATE TANGGAL ---
-st.sidebar.header("🔍 Filter Data")
-filtered_df = df_table.copy()
-
-if not df_table.empty:
-    selected_kapal = st.sidebar.multiselect("Filter Kapal", options=list_kapal_all, default=list_kapal_all)
-    selected_surat = st.sidebar.multiselect("Filter Jenis Surat", options=list_surat_all, default=list_surat_all)
-    
-    if selected_kapal:
-        filtered_df = filtered_df[filtered_df['Nama Kapal'].isin(selected_kapal)]
-    if selected_surat:
-        filtered_df = filtered_df[filtered_df['Jenis Surat'].isin(selected_surat)]
-
 # FORM UPDATE TANGGAL DI SIDEBAR
 st.sidebar.divider()
 st.sidebar.header("📝 Update Tanggal Surat")
 with st.sidebar.form("form_update_tanggal", clear_on_submit=True):
     input_kapal = st.selectbox("Pilih Kapal", options=["-- Pilih Kapal --"] + list_kapal_all)
     input_surat = st.selectbox("Pilih Jenis Surat", options=["-- Pilih Surat --"] + list_surat_all)
-    input_tgl = st.date_input("Tanggal Expired Baru", value=datetime.now())
+    
+    # 💡 Tambahkan parameter format="DD/MM/YYYY" di sini!
+    input_tgl = st.date_input(
+        "Tanggal Expired Baru", 
+        value=datetime.now(), 
+        format="DD/MM/YYYY"
+    )
+    
     btn_submit = st.form_submit_button("💾 Simpan Tanggal Ke Google Sheets")
 
 if btn_submit:
@@ -176,7 +170,7 @@ if btn_submit:
             col_target = None
             for idx, k in enumerate(header_row):
                 if str(k).strip() == input_kapal:
-                    col_target = idx + 1 # gspread menggunakan indeks basis 1
+                    col_target = idx + 1
                     break
             
             # Baris Surat (1-indexed di gspread)
@@ -187,7 +181,7 @@ if btn_submit:
                     break
             
             if row_target and col_target:
-                # Format tanggal DD-MM-YYYY untuk Google Sheets
+                # Format yang dikirim ke Google Sheets (Tgl-Bln-Thn)
                 tgl_formatted = input_tgl.strftime("%d-%m-%Y")
                 worksheet.update_cell(row_target, col_target, tgl_formatted)
                 st.sidebar.success(f"✅ Tanggal {input_surat} ({input_kapal}) berhasil diupdate ke {tgl_formatted}!")
