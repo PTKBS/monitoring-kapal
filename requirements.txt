@@ -1,4 +1,6 @@
 streamlit
 pandas
-openpyxl
+python-dateutil
 fpdf2
+gspread
+google-auth
