@@ -202,24 +202,33 @@ if btn_submit:
 st.subheader("📋 Daftar Status Surat Kapal")
 
 if not filtered_df.empty:
-    # Buat copy data untuk ditampilkan ke tabel
+    # 1. Sertakan 'Cat_Status' ke dalam show_df agar bisa dibaca oleh fungsi styling
     show_df = filtered_df[["Nama Kapal", "Jenis Surat", "Tgl Expired", "Sisa Hari", "Status", "Window Endorse (±3 Bln)", "Cat_Status"]].copy()
 
-    # Fungsi penanda warna per baris
+    # 2. Fungsi penanda warna per baris
     def highlight_rows(row):
         cat = row['Cat_Status']
         if cat == 'EXPIRED':
-            return ['background-color: #ffcccc; color: #8b0000; font-weight: bold;'] * len(row) # Red
+            return ['background-color: #ffcccc; color: #8b0000; font-weight: bold;'] * len(row) # Merah
         elif cat == 'DESAK':
-            return ['background-color: #ffe6cc; color: #b35900; font-weight: bold;'] * len(row) # Orange
+            return ['background-color: #ffe6cc; color: #b35900; font-weight: bold;'] * len(row) # Oranye
         elif cat == 'KRITIS':
-            return ['background-color: #ffffcc; color: #808000;'] * len(row) # Yellow
+            return ['background-color: #ffffcc; color: #808000;'] * len(row) # Kuning
         else:
             return [''] * len(row)
 
-    # Tampilkan dataframe ber-styling
-    styled_df = show_df.drop(columns=['Cat_Status']).style.apply(highlight_rows, axis=1)
-    st.dataframe(styled_df, use_container_width=True, hide_index=True)
+    # 3. Terapkan styling SEBELUM menyembunyikan kolom 'Cat_Status' dari layar
+    styled_df = show_df.style.apply(highlight_rows, axis=1)
+
+    # 4. Tampilkan di Streamlit dengan column_config untuk menyembunyikan 'Cat_Status' agar tidak muncul di layar
+    st.dataframe(
+        styled_df,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Cat_Status": None  # <--- Ini triknya! Menyembunyikan kolom tanpa menghapusnya dari data
+        }
+    )
 else:
     st.warning("⚠️ Tidak ada data ditemukan.")
 
