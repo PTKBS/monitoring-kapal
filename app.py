@@ -13,26 +13,49 @@ st.set_page_config(
 
 st.title("🚢 Dashboard & Laporan Monitoring Surat Kapal")
 
-# --- 2. KONEKSI GOOGLE SHEETS ---
+# --- 2. KONEKSI GOOGLE SHEETS & BACA DUA SHEET ---
 @st.cache_resource
-def get_worksheet():
+def get_sheets_data():
     credentials = dict(st.secrets["gcp_service_account"])
     if "private_key" in credentials:
         credentials["private_key"] = credentials["private_key"].replace("\\n", "\n")
         
     gc = gspread.service_account_from_dict(credentials)
     
-    # 💡 PASTE SPREADSHEET ID KAMU DI SINI
     SPREADSHEET_ID = "1ovR8ZxhQmLYv73iSu1xWEXsG1ipL448fmIhs4zJ8P6o"
-    
     sh = gc.open_by_key(SPREADSHEET_ID)
-    return sh.sheet1
+    
+    # Ambil sheet utama (sheet1) dan sheet Link_Folder
+    ws_main = sh.sheet1
+    
+    try:
+        ws_links = sh.worksheet("Link_Folder")
+        drive_data = ws_links.get_all_values()
+    except Exception:
+        drive_data = []
+        
+    return ws_main, drive_data
 
 try:
-    worksheet = get_worksheet()
+    worksheet, raw_drive_data = get_sheets_data()
 except Exception as e:
     st.error(f"⚠️ Gagal terhubung ke Google Sheets: {e}")
     st.stop()
+
+# --- FUNGSI MAPPING LINK DRIVE DARI SHEET Link_Folder ---
+def get_drive_mapping(raw_drive_data):
+    drive_dict = {}
+    if len(raw_drive_data) > 1:
+        # Asumsi Kolom A (Index 0) = Nama Kapal, Kolom B (Index 1) = Link Drive
+        for row in raw_drive_data[1:]:
+            if len(row) >= 2:
+                nama_k = str(row[0]).strip()
+                link_k = str(row[1]).strip()
+                if nama_k and link_k:
+                    drive_dict[nama_k] = link_k
+    return drive_dict
+
+DRIVE_FOLDERS = get_drive_mapping(raw_drive_data)
 
 # --- 3. BACA & TRANSFORMASI DATA MATRIKS ---
 def load_raw_matrix():
@@ -47,7 +70,6 @@ def load_and_transform_matrix_data(raw_data):
     
     rows_data = raw_data[2:]
     surat_list = []
-    
     transformed_records = []
     today = datetime.now()
 
@@ -76,7 +98,6 @@ def load_and_transform_matrix_data(raw_data):
                     tgl_exp_fmt = exp_dt.strftime("%d-%b-%Y")
                     sisa_hari_fmt = f"{sisa_hari_num} h"
                     
-                    # Status
                     if sisa_hari_num < 0:
                         status_str = "EXPIRED"
                         cat_status = "EXPIRED"
@@ -90,18 +111,18 @@ def load_and_transform_matrix_data(raw_data):
                         status_str = "AMAN"
                         cat_status = "AMAN"
                         
-                    # Window Endorse
                     jenis_upper = jenis_surat.upper()
                     if "SIUPAL" in jenis_upper and "ENDORSE" in jenis_upper:
-                        # Khusus SIUPAL ENDORSE
                         window_endorse = exp_dt.strftime('%d %b %Y')
                     elif "ENDORSE" in jenis_upper:
-                        # Endorse selain SIUPAL (±3 bulan / 90 hari)
                         start_w = exp_dt - timedelta(days=90)
                         end_w = exp_dt + timedelta(days=90)
                         window_endorse = f"{start_w.strftime('%d %b %Y')} s/d {end_w.strftime('%d %b %Y')}"
                     else:
                         window_endorse = "-"
+                    
+                    # Pencarian otomatis link dari sheet Link_Folder
+                    link_drive = DRIVE_FOLDERS.get(kapal_name, "")
                         
                     transformed_records.append({
                         "Nama Kapal": kapal_name,
@@ -110,12 +131,12 @@ def load_and_transform_matrix_data(raw_data):
                         "Sisa Hari": sisa_hari_fmt,
                         "Status": status_str,
                         "Window Endorse (±3 Bln)": window_endorse,
+                        "Sertifikat PDF": link_drive if link_drive else None,
                         "Cat_Status": cat_status,
                         "Sisa_Hari_Num": sisa_hari_num
                     })
 
     df_result = pd.DataFrame(transformed_records)
-    
     if not df_result.empty:
         df_result = df_result.sort_values(by="Sisa_Hari_Num", ascending=True)
         
@@ -124,10 +145,9 @@ def load_and_transform_matrix_data(raw_data):
 raw_data = load_raw_matrix()
 df_table, list_kapal_all, list_surat_all = load_and_transform_matrix_data(raw_data)
 
-# Inisialisasi filtered_df dari awal
 filtered_df = df_table.copy() if not df_table.empty else pd.DataFrame()
 
-# --- 4. RINGKASAN METRIK / BADGE SUMMARY ---
+# --- 4. RINGKASAN METRIK ---
 if not df_table.empty:
     cnt_expired = len(df_table[df_table['Cat_Status'] == "EXPIRED"])
     cnt_desak = len(df_table[df_table['Cat_Status'] == "DESAK"])
@@ -158,19 +178,12 @@ if not df_table.empty:
     if selected_surat:
         filtered_df = filtered_df[filtered_df['Jenis Surat'].isin(selected_surat)]
 
-# FORM UPDATE TANGGAL DI SIDEBAR
 st.sidebar.divider()
 st.sidebar.header("📝 Update Tanggal Surat")
 with st.sidebar.form("form_update_tanggal", clear_on_submit=True):
     input_kapal = st.selectbox("Pilih Kapal", options=["-- Pilih Kapal --"] + list_kapal_all)
     input_surat = st.selectbox("Pilih Jenis Surat", options=["-- Pilih Surat --"] + list_surat_all)
-    
-    # Format Tanggal Indonesia (DD/MM/YYYY)
-    input_tgl = st.date_input(
-        "Tanggal Expired Baru", 
-        value=datetime.now(), 
-        format="DD/MM/YYYY"
-    )
+    input_tgl = st.date_input("Tanggal Expired Baru", value=datetime.now(), format="DD/MM/YYYY")
     btn_submit = st.form_submit_button("💾 Simpan Tanggal Ke Google Sheets")
 
 if btn_submit:
@@ -179,18 +192,8 @@ if btn_submit:
     else:
         try:
             header_row = raw_data[1]
-            
-            col_target = None
-            for idx, k in enumerate(header_row):
-                if str(k).strip() == input_kapal:
-                    col_target = idx + 1
-                    break
-            
-            row_target = None
-            for idx, r in enumerate(raw_data):
-                if len(r) > 0 and str(r[0]).strip() == input_surat:
-                    row_target = idx + 1
-                    break
+            col_target = next((idx + 1 for idx, k in enumerate(header_row) if str(k).strip() == input_kapal), None)
+            row_target = next((idx + 1 for idx, r in enumerate(raw_data) if len(r) > 0 and str(r[0]).strip() == input_surat), None)
             
             if row_target and col_target:
                 tgl_formatted = input_tgl.strftime("%d-%m-%Y")
@@ -203,11 +206,11 @@ if btn_submit:
         except Exception as e:
             st.sidebar.error(f"⚠️ Gagal memperbarui Google Sheets: {e}")
 
-# --- 6. TAMPILAN TABEL + HIGHLIGHT WARNA ---
+# --- 6. TAMPILAN TABEL + LINK GOOGLE DRIVE ---
 st.subheader("📋 Daftar Status Surat Kapal")
 
 if not filtered_df.empty:
-    show_df = filtered_df[["Nama Kapal", "Jenis Surat", "Tgl Expired", "Sisa Hari", "Status", "Window Endorse (±3 Bln)", "Cat_Status"]].copy()
+    show_df = filtered_df[["Nama Kapal", "Jenis Surat", "Tgl Expired", "Sisa Hari", "Status", "Window Endorse (±3 Bln)", "Sertifikat PDF", "Cat_Status"]].copy()
 
     def highlight_rows(row):
         cat = row['Cat_Status']
@@ -227,7 +230,12 @@ if not filtered_df.empty:
         use_container_width=True,
         hide_index=True,
         column_config={
-            "Cat_Status": None
+            "Cat_Status": None,
+            "Sertifikat PDF": st.column_config.LinkColumn(
+                "Sertifikat PDF",
+                help="Klik untuk membuka folder sertifikat di Google Drive",
+                display_text="👁️ Buka Folder"
+            )
         }
     )
 else:
@@ -238,22 +246,18 @@ if not filtered_df.empty:
     st.divider()
     
     def generate_pdf(dataframe):
-        # 💡 Urutkan per NAMA KAPAL (A-Z), lalu di dalam kapal tersebut diurutkan dari SISA HARI TERKECIL (Expired paling atas)
         pdf_df = dataframe.sort_values(by=["Nama Kapal", "Sisa_Hari_Num"], ascending=[True, True])
-
         pdf = FPDF(orientation='L', unit='mm', format='A4')
         pdf.add_page()
         
-        # Judul Laporan
         pdf.set_font("Helvetica", 'B', 12)
         pdf.cell(277, 8, text="Laporan Monitoring Surat & Endorsement Kapal", new_x="LMARGIN", new_y="NEXT", align='C')
         pdf.set_font("Helvetica", '', 9)
         pdf.cell(277, 5, text=f"Tanggal Cetak: {datetime.now().strftime('%d-%b-%Y')}", new_x="LMARGIN", new_y="NEXT", align='C')
         pdf.ln(4)
 
-        # Header Tabel
         pdf.set_font("Helvetica", 'B', 8)
-        pdf.set_fill_color(230, 230, 230) # Warna latar header (abu-abu)
+        pdf.set_fill_color(230, 230, 230)
         w = [45, 65, 30, 25, 45, 67]
         headers = ["Nama Kapal", "Jenis Surat", "Tgl Expired", "Sisa Hari", "Status", "Window Endorse (±3 Bln)"]
         
@@ -261,23 +265,20 @@ if not filtered_df.empty:
             pdf.cell(w[i], 7, text=h, border=1, align='C', fill=True)
         pdf.ln()
 
-        # Isi Tabel Berwarna & Terurut
         pdf.set_font("Helvetica", '', 7)
         for _, row in pdf_df.iterrows():
             cat = row['Cat_Status']
-            
-            # Pewarnaan latar berdasarkan status (RGB)
             if cat == 'EXPIRED':
-                pdf.set_fill_color(255, 204, 204) # Merah Muda
+                pdf.set_fill_color(255, 204, 204)
                 fill = True
             elif cat == 'DESAK':
-                pdf.set_fill_color(255, 230, 204) # Oranye Muda
+                pdf.set_fill_color(255, 230, 204)
                 fill = True
             elif cat == 'KRITIS':
-                pdf.set_fill_color(255, 255, 204) # Kuning Muda
+                pdf.set_fill_color(255, 255, 204)
                 fill = True
             else:
-                fill = False # Putih / Tanpa Latar
+                fill = False
 
             pdf.cell(w[0], 6, text=str(row['Nama Kapal'])[:25], border=1, fill=fill)
             pdf.cell(w[1], 6, text=str(row['Jenis Surat'])[:40], border=1, fill=fill)
