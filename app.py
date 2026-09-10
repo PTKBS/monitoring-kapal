@@ -286,7 +286,7 @@ if not filtered_df.empty:
         hide_index=True,
         column_config={
             "Cat_Status": None,
-            "Jenis Surat": st.column_config.TextColumn("Jenis Surat", width="large"),
+            "Jenis Surat": st.column_config.TextColumn("Jenis Surat", width="medium"), # <-- Diubah ke medium
             "Window Endorse (±3 Bln)": st.column_config.TextColumn("Window Endorse (±3 Bln)", width="medium")
         }
     )
