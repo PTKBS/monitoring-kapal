@@ -263,7 +263,7 @@ with col_pdf:
             use_container_width=True
         )
 
-# --- TAMPILAN TABEL UTAMA (KOLOM JENIS SURAT DILEBARKAN) ---
+# --- TAMPILAN TABEL UTAMA ---
 if not filtered_df.empty:
     show_df = filtered_df[["Nama Kapal", "Jenis Surat", "Tgl Expired", "Sisa Hari", "Status", "Window Endorse (±3 Bln)", "Cat_Status"]].copy()
 
@@ -286,18 +286,18 @@ if not filtered_df.empty:
         hide_index=True,
         column_config={
             "Cat_Status": None,
-            "Jenis Surat": st.column_config.TextColumn("Jenis Surat", width="medium"), # <-- Diubah ke medium
+            "Jenis Surat": st.column_config.TextColumn("Jenis Surat", width="medium"),
             "Window Endorse (±3 Bln)": st.column_config.TextColumn("Window Endorse (±3 Bln)", width="medium")
         }
     )
 else:
     st.warning("⚠️ Tidak ada data ditemukan.")
 
-# --- 7. WIDGET BUKA FOLDER DRIVE KAPAL (DI BAWAH TABEL) ---
+# --- 7. WIDGET BUKA FOLDER DRIVE KAPAL (SEJAJAR RAPI) ---
 st.divider()
 st.subheader("📁 Akses Folder Google Drive Sertifikat")
 
-col_drive_1, col_drive_2 = st.columns([2, 1])
+col_drive_1, col_drive_2 = st.columns([3, 1])
 
 with col_drive_1:
     target_kapal_drive = st.selectbox(
@@ -307,12 +307,13 @@ with col_drive_1:
     )
 
 with col_drive_2:
-    st.write("##") # Spacing vertikal agar tombol sejajar dengan dropdown
+    # Mengatur posisi tombol agar tepat sejajar dengan kotak dropdown
+    st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
     if target_kapal_drive != "-- Pilih Kapal --":
         link_target = DRIVE_FOLDERS.get(target_kapal_drive, "")
         if link_target:
-            st.link_button(f"📂 Open Folder {target_kapal_drive}", link_target, use_container_width=True)
+            st.link_button("📂 Open Folder", link_target, use_container_width=True)
         else:
-            st.warning("⚠️ Link belum ada di sheet Link_Folder")
+            st.warning("⚠️ Link belum ada")
     else:
         st.info("👈 Pilih kapal dulu")
