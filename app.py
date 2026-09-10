@@ -55,6 +55,52 @@ def get_drive_mapping(raw_drive_data):
 
 DRIVE_FOLDERS = get_drive_mapping(raw_drive_data)
 
+# --- FUNGSI GENERATE PDF LAPORAN ---
+def generate_pdf(dataframe):
+    pdf_df = dataframe.sort_values(by=["Nama Kapal", "Sisa_Hari_Num"], ascending=[True, True])
+    pdf = FPDF(orientation='L', unit='mm', format='A4')
+    pdf.add_page()
+    
+    pdf.set_font("Helvetica", 'B', 12)
+    pdf.cell(277, 8, text="Laporan Monitoring Surat & Endorsement Kapal", new_x="LMARGIN", new_y="NEXT", align='C')
+    pdf.set_font("Helvetica", '', 9)
+    pdf.cell(277, 5, text=f"Tanggal Cetak: {datetime.now().strftime('%d-%b-%Y')}", new_x="LMARGIN", new_y="NEXT", align='C')
+    pdf.ln(4)
+
+    pdf.set_font("Helvetica", 'B', 8)
+    pdf.set_fill_color(230, 230, 230)
+    w = [45, 65, 30, 25, 45, 67]
+    headers = ["Nama Kapal", "Jenis Surat", "Tgl Expired", "Sisa Hari", "Status", "Window Endorse (±3 Bln)"]
+    
+    for i, h in enumerate(headers):
+        pdf.cell(w[i], 7, text=h, border=1, align='C', fill=True)
+    pdf.ln()
+
+    pdf.set_font("Helvetica", '', 7)
+    for _, row in pdf_df.iterrows():
+        cat = row['Cat_Status']
+        if cat == 'EXPIRED':
+            pdf.set_fill_color(255, 204, 204)
+            fill = True
+        elif cat == 'DESAK':
+            pdf.set_fill_color(255, 230, 204)
+            fill = True
+        elif cat == 'KRITIS':
+            pdf.set_fill_color(255, 255, 204)
+            fill = True
+        else:
+            fill = False
+
+        pdf.cell(w[0], 6, text=str(row['Nama Kapal'])[:25], border=1, fill=fill)
+        pdf.cell(w[1], 6, text=str(row['Jenis Surat'])[:40], border=1, fill=fill)
+        pdf.cell(w[2], 6, text=str(row['Tgl Expired']), border=1, align='C', fill=fill)
+        pdf.cell(w[3], 6, text=str(row['Sisa Hari']), border=1, align='C', fill=fill)
+        pdf.cell(w[4], 6, text=str(row['Status'])[:28], border=1, fill=fill)
+        pdf.cell(w[5], 6, text=str(row['Window Endorse (±3 Bln)']), border=1, align='C', fill=fill)
+        pdf.ln()
+
+    return bytes(pdf.output())
+
 # --- 3. BACA & TRANSFORMASI DATA MATRIKS ---
 def load_raw_matrix():
     return worksheet.get_all_values()
@@ -200,9 +246,24 @@ if btn_submit:
         except Exception as e:
             st.sidebar.error(f"⚠️ Gagal memperbarui Google Sheets: {e}")
 
-# --- 6. TAMPILAN TABEL UTAMA ---
-st.subheader("📋 Daftar Status Surat Kapal")
+# --- 6. HEADER TABEL + TOMBOL DOWNLOAD PDF (DI ATAS TABEL) ---
+col_header, col_pdf = st.columns([3, 1])
 
+with col_header:
+    st.subheader("📋 Daftar Status Surat Kapal")
+
+with col_pdf:
+    if not filtered_df.empty:
+        pdf_bytes = generate_pdf(filtered_df)
+        st.download_button(
+            label="📥 Download PDF Laporan",
+            data=pdf_bytes,
+            file_name=f"Laporan_Surat_Kapal_{datetime.now().strftime('%Y%m%d')}.pdf",
+            mime="application/pdf",
+            use_container_width=True
+        )
+
+# --- TAMPILAN TABEL UTAMA (KOLOM JENIS SURAT DILEBARKAN) ---
 if not filtered_df.empty:
     show_df = filtered_df[["Nama Kapal", "Jenis Surat", "Tgl Expired", "Sisa Hari", "Status", "Window Endorse (±3 Bln)", "Cat_Status"]].copy()
 
@@ -224,7 +285,9 @@ if not filtered_df.empty:
         use_container_width=True,
         hide_index=True,
         column_config={
-            "Cat_Status": None
+            "Cat_Status": None,
+            "Jenis Surat": st.column_config.TextColumn("Jenis Surat", width="large"),
+            "Window Endorse (±3 Bln)": st.column_config.TextColumn("Window Endorse (±3 Bln)", width="medium")
         }
     )
 else:
@@ -253,60 +316,3 @@ with col_drive_2:
             st.warning("⚠️ Link belum ada di sheet Link_Folder")
     else:
         st.info("👈 Pilih kapal dulu")
-
-# --- 8. EXPORT TO PDF ---
-if not filtered_df.empty:
-    st.divider()
-    
-    def generate_pdf(dataframe):
-        pdf_df = dataframe.sort_values(by=["Nama Kapal", "Sisa_Hari_Num"], ascending=[True, True])
-        pdf = FPDF(orientation='L', unit='mm', format='A4')
-        pdf.add_page()
-        
-        pdf.set_font("Helvetica", 'B', 12)
-        pdf.cell(277, 8, text="Laporan Monitoring Surat & Endorsement Kapal", new_x="LMARGIN", new_y="NEXT", align='C')
-        pdf.set_font("Helvetica", '', 9)
-        pdf.cell(277, 5, text=f"Tanggal Cetak: {datetime.now().strftime('%d-%b-%Y')}", new_x="LMARGIN", new_y="NEXT", align='C')
-        pdf.ln(4)
-
-        pdf.set_font("Helvetica", 'B', 8)
-        pdf.set_fill_color(230, 230, 230)
-        w = [45, 65, 30, 25, 45, 67]
-        headers = ["Nama Kapal", "Jenis Surat", "Tgl Expired", "Sisa Hari", "Status", "Window Endorse (±3 Bln)"]
-        
-        for i, h in enumerate(headers):
-            pdf.cell(w[i], 7, text=h, border=1, align='C', fill=True)
-        pdf.ln()
-
-        pdf.set_font("Helvetica", '', 7)
-        for _, row in pdf_df.iterrows():
-            cat = row['Cat_Status']
-            if cat == 'EXPIRED':
-                pdf.set_fill_color(255, 204, 204)
-                fill = True
-            elif cat == 'DESAK':
-                pdf.set_fill_color(255, 230, 204)
-                fill = True
-            elif cat == 'KRITIS':
-                pdf.set_fill_color(255, 255, 204)
-                fill = True
-            else:
-                fill = False
-
-            pdf.cell(w[0], 6, text=str(row['Nama Kapal'])[:25], border=1, fill=fill)
-            pdf.cell(w[1], 6, text=str(row['Jenis Surat'])[:40], border=1, fill=fill)
-            pdf.cell(w[2], 6, text=str(row['Tgl Expired']), border=1, align='C', fill=fill)
-            pdf.cell(w[3], 6, text=str(row['Sisa Hari']), border=1, align='C', fill=fill)
-            pdf.cell(w[4], 6, text=str(row['Status'])[:28], border=1, fill=fill)
-            pdf.cell(w[5], 6, text=str(row['Window Endorse (±3 Bln)']), border=1, align='C', fill=fill)
-            pdf.ln()
-
-        return bytes(pdf.output())
-
-    pdf_bytes = generate_pdf(filtered_df)
-    st.download_button(
-        label="📥 Download PDF Laporan Berwarna",
-        data=pdf_bytes,
-        file_name=f"Laporan_Surat_Kapal_{datetime.now().strftime('%Y%m%d')}.pdf",
-        mime="application/pdf"
-    )
