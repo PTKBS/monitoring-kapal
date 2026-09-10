@@ -25,7 +25,6 @@ def get_sheets_data():
     SPREADSHEET_ID = "1ovR8ZxhQmLYv73iSu1xWEXsG1ipL448fmIhs4zJ8P6o"
     sh = gc.open_by_key(SPREADSHEET_ID)
     
-    # Ambil sheet utama (sheet1) dan sheet Link_Folder
     ws_main = sh.sheet1
     
     try:
@@ -46,7 +45,6 @@ except Exception as e:
 def get_drive_mapping(raw_drive_data):
     drive_dict = {}
     if len(raw_drive_data) > 1:
-        # Asumsi Kolom A (Index 0) = Nama Kapal, Kolom B (Index 1) = Link Drive
         for row in raw_drive_data[1:]:
             if len(row) >= 2:
                 nama_k = str(row[0]).strip()
@@ -120,9 +118,6 @@ def load_and_transform_matrix_data(raw_data):
                         window_endorse = f"{start_w.strftime('%d %b %Y')} s/d {end_w.strftime('%d %b %Y')}"
                     else:
                         window_endorse = "-"
-                    
-                    # Pencarian otomatis link dari sheet Link_Folder
-                    link_drive = DRIVE_FOLDERS.get(kapal_name, "")
                         
                     transformed_records.append({
                         "Nama Kapal": kapal_name,
@@ -131,7 +126,6 @@ def load_and_transform_matrix_data(raw_data):
                         "Sisa Hari": sisa_hari_fmt,
                         "Status": status_str,
                         "Window Endorse (±3 Bln)": window_endorse,
-                        "Sertifikat PDF": link_drive if link_drive else None,
                         "Cat_Status": cat_status,
                         "Sisa_Hari_Num": sisa_hari_num
                     })
@@ -206,11 +200,11 @@ if btn_submit:
         except Exception as e:
             st.sidebar.error(f"⚠️ Gagal memperbarui Google Sheets: {e}")
 
-# --- 6. TAMPILAN TABEL + LINK GOOGLE DRIVE ---
+# --- 6. TAMPILAN TABEL UTAMA ---
 st.subheader("📋 Daftar Status Surat Kapal")
 
 if not filtered_df.empty:
-    show_df = filtered_df[["Nama Kapal", "Jenis Surat", "Tgl Expired", "Sisa Hari", "Status", "Window Endorse (±3 Bln)", "Sertifikat PDF", "Cat_Status"]].copy()
+    show_df = filtered_df[["Nama Kapal", "Jenis Surat", "Tgl Expired", "Sisa Hari", "Status", "Window Endorse (±3 Bln)", "Cat_Status"]].copy()
 
     def highlight_rows(row):
         cat = row['Cat_Status']
@@ -230,18 +224,37 @@ if not filtered_df.empty:
         use_container_width=True,
         hide_index=True,
         column_config={
-            "Cat_Status": None,
-            "Sertifikat PDF": st.column_config.LinkColumn(
-                "Sertifikat PDF",
-                help="Klik untuk membuka folder sertifikat di Google Drive",
-                display_text="👁️ Buka Folder"
-            )
+            "Cat_Status": None
         }
     )
 else:
     st.warning("⚠️ Tidak ada data ditemukan.")
 
-# --- 7. EXPORT TO PDF ---
+# --- 7. WIDGET BUKA FOLDER DRIVE KAPAL (DI BAWAH TABEL) ---
+st.divider()
+st.subheader("📁 Akses Folder Google Drive Sertifikat")
+
+col_drive_1, col_drive_2 = st.columns([2, 1])
+
+with col_drive_1:
+    target_kapal_drive = st.selectbox(
+        "Pilih Kapal untuk Buka Folder Sertifikat:",
+        options=["-- Pilih Kapal --"] + list_kapal_all,
+        key="drive_kapal_select"
+    )
+
+with col_drive_2:
+    st.write("##") # Spacing vertikal agar tombol sejajar dengan dropdown
+    if target_kapal_drive != "-- Pilih Kapal --":
+        link_target = DRIVE_FOLDERS.get(target_kapal_drive, "")
+        if link_target:
+            st.link_button(f"📂 Open Folder {target_kapal_drive}", link_target, use_container_width=True)
+        else:
+            st.warning("⚠️ Link belum ada di sheet Link_Folder")
+    else:
+        st.info("👈 Pilih kapal dulu")
+
+# --- 8. EXPORT TO PDF ---
 if not filtered_df.empty:
     st.divider()
     
